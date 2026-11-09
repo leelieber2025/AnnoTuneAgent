@@ -71,7 +71,7 @@ annotuneagent = "annotuneagent.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/leelieber2025/AnnoTuneAgent"
-Documentation = "https://app.readthedocs.org/projects/annotuneagent/"
+Documentation = "https://annotuneagent.readthedocs.io/"
 Changelog = "https://github.com/leelieber2025/AnnoTuneAgent/blob/main/CHANGELOG.md"
 Source = "https://github.com/leelieber2025/AnnoTuneAgent"
 Issues = "https://github.com/leelieber2025/AnnoTuneAgent/issues"

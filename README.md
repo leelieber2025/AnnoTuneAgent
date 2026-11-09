@@ -3,12 +3,12 @@
 [![PyPI version](https://img.shields.io/pypi/v/annotuneagent.svg)](https://pypi.org/project/annotuneagent/)
 [![PyPI downloads](https://img.shields.io/pepy/dt/annotuneagent.svg?label=PyPI%20downloads)](https://pepy.tech/project/annotuneagent)
 [![Python versions](https://img.shields.io/pypi/pyversions/annotuneagent.svg)](https://pypi.org/project/annotuneagent/)
-[![Documentation](https://app.readthedocs.org/projects/annotuneagent/badge/?version=latest)](https://app.readthedocs.org/projects/annotuneagent/)
+[![Documentation Status](https://readthedocs.org/projects/annotuneagent/badge/?version=latest)](https://annotuneagent.readthedocs.io/en/latest/?badge=latest)
 [![CI](https://github.com/leelieber2025/AnnoTuneAgent/actions/workflows/tests.yml/badge.svg)](https://github.com/leelieber2025/AnnoTuneAgent/actions/workflows/tests.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24092828.svg)](https://doi.org/10.5281/zenodo.24092828)
 
-Documentation: [Read the Docs](https://app.readthedocs.org/projects/annotuneagent/).
+Documentation: [Read the Docs](https://annotuneagent.readthedocs.io/en/latest/).
 
 **Cluster-level cell-type annotation for single-cell RNA-seq, with two
 fine-tuned language models that run locally.**
