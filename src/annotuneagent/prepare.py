@@ -134,13 +134,6 @@ def prepare(
     seconds it took. ``show=True`` then prints the QC rules and draws the QC
     figures, the variance elbow, and the UMAP.
     """
-    if install_hint(
-        batch_correction=batch_correction,
-        doublet_method=doublet_method,
-        scfair=scfair,
-        denoise=denoise,
-    ):
-        return adata
     if species not in _SPECIES:
         raise ValueError(f"species must be human or mouse, got {species!r}")
     require_unique_var_names(adata)
@@ -188,12 +181,21 @@ def prepare(
         correction in ("scvi", "scvi+harmony") or doublet_method == "solo"
     ) and not adata.obs_names.is_unique:
         raise ValueError("scVI/SOLO requires unique cell names in adata.obs_names")
+    if denoise and raw is None:
+        raise ValueError(RAW_REQUIRED)
+    if correction in ("harmony", "combat", "scanorama", "scvi+harmony"):
+        _require_batches(adata, batch_key)
+    if install_hint(
+        batch_correction=batch_correction,
+        doublet_method=doublet_method,
+        scfair=scfair,
+        denoise=denoise,
+    ):
+        return adata
     n_in = int(adata.n_obs)
     n_genes_in = int(adata.n_vars)
     started = time.perf_counter()
     if denoise:
-        if raw is None:
-            raise ValueError(RAW_REQUIRED)
         n_samples = 1 if sample_key is None else int(adata.obs[sample_key].nunique())
         with _timed("prepare  denoise") as note:
             adata = _denoise(adata, raw=raw, sample_key=sample_key)

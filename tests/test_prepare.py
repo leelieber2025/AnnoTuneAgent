@@ -73,8 +73,9 @@ def test_missing_optional_package_prints_install_and_keeps_counts(
 
     monkeypatch.setattr(prepare_module, "find_spec", fake)
     adata = _counts()
+    adata.obs["sample"] = ["a"] * 40 + ["b"] * 40
     before = adata.X.copy()
-    out = prepare(adata, species="human", **kwargs)
+    out = prepare(adata, species="human", batch_key="sample", **kwargs)
     assert out is adata
     assert np.array_equal(adata.X, before)
     text = capsys.readouterr().out
@@ -134,6 +135,7 @@ def test_denoise_without_raw_is_refused():
 
 
 def test_denoise_fits_each_sample_on_its_own_raw_matrix(tmp_path, monkeypatch):
+    pytest.importorskip("ambidose")
     import ambidose
 
     seen = []
@@ -377,7 +379,38 @@ def test_solo_and_scvi_clustering_are_independent(monkeypatch, tmp_path):
     assert (tmp_path / "saved.txt").read_text() == str(tmp_path / "model")
     assert fake.settings.seed == 0
 
+
+def test_scvi_harmony_uses_the_scvi_latent(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    pytest.importorskip("harmonypy")
     import harmonypy
+
+    class FakeSCVI:
+        @staticmethod
+        def setup_anndata(adata, layer=None, batch_key=None):
+            return None
+
+        def __init__(self, adata, **kwargs):
+            self.adata = adata
+            self.n_latent = kwargs.get("n_latent", 10)
+
+        def train(self, **kwargs):
+            assert kwargs == {"early_stopping": True}
+
+        def get_latent_representation(self):
+            return np.random.default_rng(0).normal(size=(self.adata.n_obs, self.n_latent))
+
+        def save(self, path, overwrite):
+            return None
+
+    fake = SimpleNamespace(
+        settings=SimpleNamespace(seed=None),
+        model=SimpleNamespace(SCVI=FakeSCVI),
+        external=SimpleNamespace(SOLO=object),
+    )
+    monkeypatch.setitem(sys.modules, "scvi", fake)
 
     def run_harmony(data_mat, meta, key, **kwargs):
         assert key == "sample"
@@ -498,6 +531,8 @@ def test_harmony_output_is_oriented_to_cells_by_components():
 
 
 def test_harmony_and_scanorama_feed_the_neighbor_graph(monkeypatch):
+    pytest.importorskip("harmonypy")
+    pytest.importorskip("scanorama")
     import harmonypy
     import scanpy as sc
 
