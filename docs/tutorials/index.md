@@ -1,22 +1,25 @@
 # Tutorials
 
 `prepare` is the first call. It prints the QC rules, then draws the QC
-figures and the UMAP. The second call is annotation with the name and ml
-adapters. The server stays loaded.
+figures and the UMAP. `run` collects the marker score, the name-model result,
+and the ML-model result, and writes the title. The model server stays loaded
+between calls.
 
-| Notebook | What it does |
-|----------|----------------|
-| {doc}`pbmc8k_annotation` | Public PBMC 8k. `prepare`, then name and ml. |
-| {doc}`load_model` | Use a local server, or connect to one that is already running. |
+| Notebook | Contents |
+|----------|----------|
+| {doc}`pbmc8k_annotation` | Public PBMC 8k: `prepare`, then the name and ML models |
+| {doc}`load_model` | Download the weights, then use a local server or connect to a remote one |
 
-{doc}`pbmc8k_annotation` loads the public PBMC 8k count matrix (7,750 cells),
-not the Scanpy PBMC 3k set. That file is already cells, so AmbiDose stays off.
-The saved outputs are from this matrix.
+{doc}`pbmc8k_annotation` uses the public 10x PBMC 8k count matrix (7,750 cells),
+not the Scanpy PBMC 3k set. The matrix contains cells only, so AmbiDose is off.
+The saved outputs come from this matrix.
 
 ```bash
 pip install -e ".[dev,models]"
 jupyter lab docs/tutorials/
 ```
+
+`[models]` installs the tokenizer loader for local GGUF calls. Jupyter is not included; install it separately.
 
 ::::{grid} 1 1 2 2
 :gutter: 3
@@ -25,7 +28,7 @@ jupyter lab docs/tutorials/
 :link: pbmc8k_annotation
 :link-type: doc
 
-`prepare`, then name and ml. The server stays loaded.
+`prepare`, then the name and ML models.
 +++
 Public PBMC 8k counts
 :::
@@ -34,9 +37,9 @@ Public PBMC 8k counts
 :link: load_model
 :link-type: doc
 
-Use a local server at `http://127.0.0.1:8080`, or connect to a remote one.
+Run a local server at `http://127.0.0.1:8080`, or connect to a remote one.
 +++
-Your server or GGUF files; the tokenizer is installed with the package
+Needs GGUF files or a running server
 :::
 
 ::::

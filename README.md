@@ -5,11 +5,9 @@
 **Cluster-level cell-type annotation for single-cell RNA-seq, with two
 fine-tuned language models that run locally.**
 
-Most annotation tools stop at a marker score or a reference-label transfer.
-AnnoTuneAgent adds two small fine-tuned models and keeps the final call
-auditable: each cluster gets a marker score, a name-model answer, and an
-ML-model answer, and a rule-based judgment reads all three before writing the
-title.
+Each cluster gets a marker score, a name-model result, and an ML-model
+result. A rule-based judgment reads all three and writes the title, so every
+call stays auditable.
 
 ## What is fine-tuned
 
@@ -68,18 +66,17 @@ cd AnnoTuneAgent
 pip install -e .
 ```
 
-Ambient subtraction needs [AmbiDose](https://github.com/leelieber2025/AmbiDose)
-and is off unless `prepare(..., denoise=True)`. scVI and SOLO need
-`pip install -e '.[scvi]'`. scFair gene selection needs
-`pip install -e '.[scfair]'`. Harmony, Scanorama, scVI, scFair, and AmbiDose
-are optional. If one of them is selected and missing, `prepare` prints the
-install command and leaves the matrix unchanged. ComBat is part of Scanpy.
+Local GGUF models need `pip install -e '.[models]'`. Optional methods:
+AmbiDose (`denoise=True`, [install](https://github.com/leelieber2025/AmbiDose)),
+scVI and SOLO (`'.[scvi]'`), scFair (`'.[scfair]'`), Harmony, and Scanorama. If
+you select one that is missing, `prepare` prints the install command and
+leaves the matrix unchanged. See [Installation](docs/installation.md).
 
 ## First run
 
 `prepare` expects raw integer counts. `run` expects finite, nonnegative,
-library-size-normalized natural log1p expression, which `prepare` writes,
-with Scanpy's `adata.uns["log1p"]`.
+library-size-normalized natural log1p expression with Scanpy's
+`adata.uns["log1p"]`, which `prepare` writes.
 
 ```python
 import annotuneagent as ata

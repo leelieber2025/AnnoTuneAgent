@@ -1,22 +1,9 @@
 # Installation
 
-Python 3.10–3.13. AnnData, Scanpy, NumPy, pandas, and SciPy are installed
-with the package. Ambient subtraction needs AmbiDose, and only when you turn
-it on. scFair is used only when `prepare(..., scfair=True)`.
-
-| Package | Why it is there |
-|---------|-----------------|
-| `scanpy[leiden]>=1.10` | QC metrics, neighbors, Leiden `flavor="igraph"` |
-| `scikit-misc>=0.1.4` | Default `seurat_v3` highly variable genes |
-| `scfair` | Optional extra, `pip install annotuneagent[scfair]`. Variable genes and the resolution when `scfair=True` |
-| `ambidose` | Optional ambient subtraction from a raw droplet matrix |
-| `harmonypy` | Optional. Harmony neighbor-graph correction |
-| `scanorama` | Optional. Scanorama neighbor-graph correction |
-| `scvi-tools>=1.1.3` | Optional. scVI latent clustering and SOLO doublet detection; install with `pip install -e '.[scvi]'` |
-| `igraph>=0.10` | Installed through Scanpy's Leiden extra |
+Python 3.10–3.13.
 
 ```bash
-pip install -e ".[dev]"
+pip install -e .
 ```
 
 ```python
@@ -24,24 +11,45 @@ import annotuneagent as ata
 print(ata.__version__)
 ```
 
-The version string is `src/annotuneagent/_version.py` (currently **0.1.0**).
+The version is set in `src/annotuneagent/_version.py` (currently **0.1.0**).
 
-GGUF weights are not included in the Python package. They are on the Hugging
-Face Hub at [lieberlee/annotune-qwen3.5-4b-gguf](https://huggingface.co/lieberlee/annotune-qwen3.5-4b-gguf).
-Download them as {doc}`tutorials/load_model` shows, then pass the directory to
-`local_models(root)`. The Qwen tokenizer is installed with the package.
-The Cell Ontology snapshot, reviewed name map, and granularity policy are also
-installed with the package.
-The included tokenizer files come from `Qwen/Qwen3.5-4B` under Apache-2.0;
-their license is included at `annotuneagent/tokenizer/LICENSE`.
+## Dependencies
+
+AnnData, Scanpy, NumPy, pandas, SciPy, and scikit-learn are installed with the
+package. These are optional:
+
+| Package | Purpose | Install |
+|---------|---------|---------|
+| `ambidose` | Ambient RNA subtraction (`denoise=True`) | see [AmbiDose](https://github.com/leelieber2025/AmbiDose) |
+| `harmonypy` | Harmony batch correction | `pip install harmonypy` |
+| `scanorama` | Scanorama batch correction | `pip install scanorama` |
+| `scvi-tools>=1.1.3` | scVI batch correction and SOLO doublets | `pip install -e '.[scvi]'` |
+| `scfair>=0.8` | scFair gene selection (`scfair=True`) | `pip install -e '.[scfair]'` |
+| `transformers` | Tokenizer loader for local GGUF models | `pip install -e '.[models]'` |
+
+If you select an optional method and its package is missing, `prepare` prints
+the install command and leaves the matrix unchanged. ComBat is part of Scanpy.
+
+Other extras:
 
 ```bash
-pip install -e ".[docs]"
-
-# For local GGUF model calls
-pip install -e ".[models]"
+pip install -e ".[docs]"    # build this documentation
+pip install -e ".[dev]"     # pytest and ruff
 ```
 
-First call: {doc}`quickstart`. QC and annotation:
-{doc}`tutorials/pbmc8k_annotation`. A local server or a remote one:
-{doc}`tutorials/load_model`.
+## Model weights
+
+The GGUF weights are not in the Python package. Download them from the
+Hugging Face Hub:
+[lieberlee/annotune-qwen3.5-4b-gguf](https://huggingface.co/lieberlee/annotune-qwen3.5-4b-gguf).
+{doc}`tutorials/load_model` shows the download and passes the folder to
+`local_models(root)`.
+
+The package includes the Qwen tokenizer files, the Cell Ontology snapshot, and
+the reviewed name map. The tokenizer files come from `Qwen/Qwen3.5-4B`
+(Apache-2.0); the license is at `annotuneagent/tokenizer/LICENSE`.
+
+## Next
+
+{doc}`quickstart` for a first call, {doc}`tutorials/pbmc8k_annotation` for QC and
+annotation, {doc}`tutorials/load_model` for a local or remote model server.

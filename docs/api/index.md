@@ -4,9 +4,7 @@
 import annotuneagent as ata
 ```
 
-Public surface: the names below, plus `annotuneagent.__version__`.
-
-## Prepare and annotate
+The public API is the names below and `annotuneagent.__version__`.
 
 ```{eval-rst}
 .. currentmodule:: annotuneagent
@@ -18,8 +16,11 @@ Public surface: the names below, plus `annotuneagent.__version__`.
    read_10x
    prepare
    run
+   annotate
+   evaluate
+   Hypothesis
    local_models
+   local_server
    ModelChain
    TaskEndpoint
-   annotate
 ```
