@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+title: "AnnoTuneAgent: cluster-level cell-type annotation from marker evidence"
+message: >-
+  If you use this software, please cite the software record below and pin
+  the package version used in the analysis.
+type: software
+authors:
+  - family-names: "Li"
+    given-names: "Zhao (李钊)"
+    email: "leelieber@gmail.com"
+    orcid: "https://orcid.org/0000-0002-9276-9129"
+repository-code: "https://github.com/leelieber2025/AnnoTuneAgent"
+license: Apache-2.0
+version: 0.1.0
+date-released: "2026-11-09"
+keywords:
+  - single-cell
+  - RNA-seq
+  - cell type annotation
+  - marker genes
+  - bioinformatics

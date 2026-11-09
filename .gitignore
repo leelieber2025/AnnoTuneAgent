@@ -1,0 +1,45 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+
+*.h5ad
+!tests/**/*.h5ad
+.ipynb_checkpoints/
+*.zip
+.DS_Store
+
+# Model weights and local training artifacts
+*.gguf
+*.safetensors
+*.tgz
+*.tar.gz
+cache/
+unsloth_compiled_cache/
+docs/api/generated/
+
+# Uploaded: src/, docs/, tests/ (except the three files below), and the
+# packaging files (README, CHANGELOG, LICENSE, CITATION.cff, SECURITY.md,
+# pyproject.toml, MANIFEST.in, setup.cfg, .gitignore, .gitattributes,
+# .readthedocs.yaml, .github/workflows).
+# Not uploaded:
+data/
+scripts/
+DEVLOG.md
+AGENTS.md
+review.md
+AnnoTuneAgent_Design.md
+tests/test_action_arbiter.py
+tests/test_action_arbiter_eval.py
+tests/test_prepare_sft.py

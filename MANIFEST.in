@@ -1,0 +1,50 @@
+include LICENSE
+include README.md
+include CHANGELOG.md
+include CITATION.cff
+include SECURITY.md
+
+include pyproject.toml
+include MANIFEST.in
+include .gitignore
+include .readthedocs.yaml
+
+graft tests
+prune docs
+
+# Public documentation allowlist. Internal notes must not enter a release artifact.
+include docs/conf.py
+include docs/requirements.txt
+include docs/index.md
+include docs/installation.md
+include docs/quickstart.md
+include docs/marker_sources.md
+recursive-include docs/_static *
+recursive-include docs/_templates *
+recursive-include docs/api *.md
+recursive-include docs/tutorials *.md *.ipynb
+
+prune scripts
+prune data
+exclude DEVLOG.md
+exclude AGENTS.md
+exclude review.md
+exclude AnnoTuneAgent_Design.md
+
+graft .github/workflows
+
+prune .git
+prune .mypy_cache
+prune .pytest_cache
+prune .ruff_cache
+prune src/*.egg-info
+global-exclude *.pyc
+global-exclude __pycache__/*
+global-exclude *.egg-info
+global-exclude *.egg-info/*
+global-exclude *.h5ad
+global-exclude *.zip
+global-exclude .DS_Store
+global-exclude .ipynb_checkpoints
+global-exclude *-checkpoint.*
+global-exclude .ipynb_checkpoints/*

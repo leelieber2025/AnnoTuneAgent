@@ -1,0 +1,68 @@
+/* AnnoTuneAgent documentation polish on top of sphinx-book-theme. */
+
+:root {
+  --annotune-accent: #2a6f8e;
+  --annotune-code-bg: #f7f9fb;
+  --annotune-code-border: #e3e8ee;
+  --annotune-table-head: #eef3f6;
+  --annotune-table-border: #dce3ea;
+}
+
+html[data-theme="dark"] {
+  --annotune-accent: #56a6c2;
+  --annotune-code-bg: #1b1f24;
+  --annotune-code-border: #2c333c;
+  --annotune-table-head: #222831;
+  --annotune-table-border: #2c333c;
+}
+
+.bd-main .bd-content {
+  max-width: 88rem;
+}
+
+.bd-article {
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.bd-article h1 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.bd-article h2 {
+  margin-top: 1.6em;
+  border-bottom: 1px solid var(--annotune-table-border);
+  padding-bottom: 0.25em;
+}
+
+.bd-article table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+
+.bd-article th {
+  background: var(--annotune-table-head);
+}
+
+.bd-article th,
+.bd-article td {
+  border: 1px solid var(--annotune-table-border);
+  padding: 0.4em 0.65em;
+}
+
+div.highlight pre,
+.bd-article pre {
+  background: var(--annotune-code-bg) !important;
+  border: 1px solid var(--annotune-code-border);
+  border-radius: 6px;
+}
+
+a {
+  text-decoration-thickness: 1px;
+}
+
+.admonition {
+  border-radius: 6px;
+}

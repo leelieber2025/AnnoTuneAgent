@@ -1,0 +1,8 @@
+policy_version: "0.1"
+dataset_granularity_override: {}
+adopt_coarse_candidate: false
+require_for_adoption:
+  - marker_coverage_min
+  - dataset_convention_documented
+  - reviewer
+default_route_on_conflict: review
