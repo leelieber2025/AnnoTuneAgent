@@ -1,6 +1,9 @@
 # AnnoTuneAgent
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Documentation](https://app.readthedocs.org/projects/annotuneagent/badge/?version=latest)](https://app.readthedocs.org/projects/annotuneagent/)
+
+Documentation: [Read the Docs](https://app.readthedocs.org/projects/annotuneagent/).
 
 **Cluster-level cell-type annotation for single-cell RNA-seq, with two
 fine-tuned language models that run locally.**
