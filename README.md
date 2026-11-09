@@ -2,11 +2,61 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-Cluster-level cell-type annotation for single-cell RNA-seq. `prepare` runs
-QC, gene selection, and Leiden on integer counts. `run` scores a marker
-dictionary and writes one name per cluster. An optional local model can
-review a cluster when the markers do not settle it. The package does not
-discover cell types that are absent from the dictionary.
+**Cluster-level cell-type annotation for single-cell RNA-seq, with two
+fine-tuned language models that run locally.**
+
+Most annotation tools stop at a marker score or a reference-label transfer.
+AnnoTuneAgent adds two small fine-tuned models and keeps the final call
+auditable: each cluster gets a marker score, a name-model answer, and an
+ML-model answer, and a rule-based judgment reads all three before writing the
+title.
+
+## What is fine-tuned
+
+One Qwen3.5-4B base (Q6_K GGUF) is shared by two independent LoRA adapters.
+The adapters are not merged into the base, so they load together on a single
+local `llama-server` and can be replaced without touching the base.
+
+| Model | Task it was fine-tuned for | Input | Output |
+| --- | --- | --- | --- |
+| **name** | Choose a cell-type name from the marker dictionary | Cluster marker evidence and `dictionary_hits` | A name copied from `dictionary_hits` when that type's markers support the cluster |
+| **ML** | Choose a name from measured cluster statistics | Differential expression, candidate marker panels, log fold change, fraction of cells expressing each gene inside and outside the cluster, panel summaries | A name copied from those candidates |
+
+Both models are trained to **copy** a name from the candidates they are
+shown, not to free-write one. A name outside the candidate list cannot become
+a title, and a name with no marker that passes expression and specificity
+validation is flagged (`no_marker_passed`) instead of being trusted silently.
+
+The weights are on the Hugging Face Hub:
+[lieberlee/annotune-qwen3.5-4b-gguf](https://huggingface.co/lieberlee/annotune-qwen3.5-4b-gguf)
+(preview). Inference is local: no cluster data leaves the machine.
+
+## Pipeline
+
+```text
+raw counts ─ prepare ─▶ QC, doublets, normalization, batch correction, Leiden
+           ─ run ─────▶ per cluster:
+                          1. marker score        (built-in human / mouse dictionary)
+                          2. name model          (LoRA, copies from dictionary_hits)
+                          3. ML model            (LoRA, copies from measured candidates)
+                          ▼
+                        judgment ─▶ title + status + reason + hint
+                          ▼
+                        validated marker panels, dotplot, report, annotated h5ad
+```
+
+- **Judgment, not voting.** Agreement among the three results gives a clear
+  title. Disagreement, mixed programs, and unvalidated names are kept and
+  flagged with a reason (`mixed_programs`, `near_clear_cluster`,
+  `subcluster_labels`, `no_marker_passed`) so you can review them.
+- **Marker evidence is checked, not quoted.** Panels are selected from cited
+  dictionary markers and validated against measured expression and
+  specificity in your data.
+- **Every title is traceable.** The report records each model's answer, the
+  panel, and the reason a cluster was or was not settled.
+
+The models run when `models` is passed (or the CLI adapter flags are given).
+Without them, `run` uses the marker score alone.
 
 ## Install
 
@@ -21,7 +71,9 @@ pip install -e .
 Ambient subtraction needs [AmbiDose](https://github.com/leelieber2025/AmbiDose)
 and is off unless `prepare(..., denoise=True)`. scVI and SOLO need
 `pip install -e '.[scvi]'`. scFair gene selection needs
-`pip install -e '.[scfair]'`.
+`pip install -e '.[scfair]'`. Harmony, Scanorama, scVI, scFair, and AmbiDose
+are optional. If one of them is selected and missing, `prepare` prints the
+install command and leaves the matrix unchanged. ComBat is part of Scanpy.
 
 ## First run
 
