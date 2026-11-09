@@ -48,6 +48,8 @@ def test_cli_can_select_solo_and_scvi_independently(tmp_path: Path, monkeypatch)
 
     monkeypatch.setattr(prep_module, "_drop_solo_doublets", solo)
     monkeypatch.setattr(prep_module, "_fit_scvi", scvi)
+    # The stubs stand in for scVI. The install check must not return first.
+    monkeypatch.setattr(prep_module, "_is_missing", lambda name: False)
     assert (
         main(
             [
@@ -79,6 +81,39 @@ def test_cli_can_select_solo_and_scvi_independently(tmp_path: Path, monkeypatch)
     assert "X_scVI" in saved.obsm and "leiden" in saved.obs
     assert json.loads(saved.uns["annotune_prep"])["doublets"]["method"] == "solo"
     assert out.is_file()
+
+
+def test_cli_prepare_prints_install_line_when_scvi_is_missing(tmp_path: Path, monkeypatch, capsys):
+    from importlib import import_module
+
+    prep_module = import_module("annotuneagent.prepare")
+    monkeypatch.setattr(prep_module, "_is_missing", lambda name: name == "scvi")
+    src = tmp_path / "input.h5ad"
+    out = tmp_path / "report.json"
+    hypotheses = tmp_path / "hypotheses.json"
+    with ad.settings.override(allow_write_nullable_strings=True):
+        AnnData(X=np.ones((8, 4))).write_h5ad(src)
+    hypotheses.write_text(json.dumps([{"name": "candidate", "positive": ["Gene0"]}]))
+    assert (
+        main(
+            [
+                "--input",
+                str(src),
+                "--output",
+                str(out),
+                "--hypotheses",
+                str(hypotheses),
+                "--species",
+                "human",
+                "--prepare",
+                "--batch-correction",
+                "scvi",
+            ]
+        )
+        == 0
+    )
+    assert "scvi is not installed. Install it with:" in capsys.readouterr().out
+    assert not out.exists()
 
 
 @pytest.mark.parametrize(
