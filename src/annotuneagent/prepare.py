@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import warnings
 from collections.abc import Iterator
@@ -959,6 +960,18 @@ def _drop_doublets(adata: AnnData, sample_key: str | None, chip: str) -> dict:
     }
 
 
+def _is_missing(name: str) -> bool:
+    """True when ``name`` cannot be imported.
+
+    A stand-in already stored in ``sys.modules`` has no ``__spec__``.
+    ``find_spec`` raises on that object, so it counts as present.
+    """
+    loaded = sys.modules.get(name)
+    if loaded is not None and getattr(loaded, "__spec__", None) is None:
+        return False
+    return find_spec(name) is None
+
+
 def install_hint(
     *,
     batch_correction: str = "none",
@@ -983,7 +996,7 @@ def install_hint(
         needed.append("scfair")
     if denoise:
         needed.append("ambidose")
-    missing = [name for name in needed if find_spec(name) is None]
+    missing = [name for name in needed if _is_missing(name)]
     for name in missing:
         print(f"{name} is not installed. Install it with: {_OPTIONAL[name]}", flush=True)
     return bool(missing)
