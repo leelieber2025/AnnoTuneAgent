@@ -3,8 +3,10 @@
 Python 3.10–3.13.
 
 ```bash
-pip install -e .
+pip install annotuneagent
 ```
+
+From a checkout, `pip install -e .` installs this tree instead.
 
 ```python
 import annotuneagent as ata
@@ -23,9 +25,9 @@ package. These are optional:
 | `ambidose` | Ambient RNA subtraction (`denoise=True`) | see [AmbiDose](https://github.com/leelieber2025/AmbiDose) |
 | `harmonypy` | Harmony batch correction | `pip install harmonypy` |
 | `scanorama` | Scanorama batch correction | `pip install scanorama` |
-| `scvi-tools>=1.1.3` | scVI batch correction and SOLO doublets | `pip install -e '.[scvi]'` |
-| `scfair>=0.8` | scFair gene selection (`scfair=True`) | `pip install -e '.[scfair]'` |
-| `transformers` | Tokenizer loader for local GGUF models | `pip install -e '.[models]'` |
+| `scvi-tools>=1.1.3` | scVI batch correction and SOLO doublets | `pip install 'annotuneagent[scvi]'` |
+| `scfair>=0.8` | scFair gene selection (`scfair=True`) | `pip install 'annotuneagent[scfair]'` |
+| `transformers` | Tokenizer loader for local GGUF models | `pip install 'annotuneagent[models]'` |
 
 If you select an optional method and its package is missing, `prepare` prints
 the install command and leaves the matrix unchanged. ComBat is part of Scanpy.
@@ -33,7 +35,7 @@ the install command and leaves the matrix unchanged. ComBat is part of Scanpy.
 Other extras:
 
 ```bash
-pip install -e ".[docs]"    # build this documentation
+pip install -e ".[docs]"    # build this documentation from a checkout
 pip install -e ".[dev]"     # pytest and ruff
 ```
 

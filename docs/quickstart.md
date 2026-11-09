@@ -1,7 +1,7 @@
 # Quickstart
 
 ```bash
-pip install -e .
+pip install annotuneagent
 ```
 
 ```python
@@ -73,7 +73,7 @@ Batch correction is off by default. `batch_correction="harmony"`, `"combat"`,
 or `"scanorama"` changes the neighbor graph used for Leiden and UMAP. Marker
 scores still read the log1p matrix.
 
-`batch_correction="scvi"` needs `pip install -e '.[scvi]'`. It trains on the
+`batch_correction="scvi"` needs `pip install 'annotuneagent[scvi]'`. It trains on the
 raw `counts` layer (highly variable genes only), stores the latent coordinates
 in `obsm["X_scVI"]`, and builds neighbors, Leiden, and UMAP from them.
 `adata.X` stays log1p for marker scoring. `n_pcs` sets the latent dimension

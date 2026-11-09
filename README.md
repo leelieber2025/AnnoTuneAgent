@@ -1,6 +1,7 @@
 # AnnoTuneAgent
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/annotuneagent.svg)](https://pypi.org/project/annotuneagent/)
 [![Documentation](https://app.readthedocs.org/projects/annotuneagent/badge/?version=latest)](https://app.readthedocs.org/projects/annotuneagent/)
 
 Documentation: [Read the Docs](https://app.readthedocs.org/projects/annotuneagent/).
@@ -64,16 +65,17 @@ Without them, `run` uses the marker score alone.
 Python 3.10–3.13.
 
 ```bash
-git clone https://github.com/leelieber2025/AnnoTuneAgent
-cd AnnoTuneAgent
-pip install -e .
+pip install annotuneagent
 ```
 
-Local GGUF models need `pip install -e '.[models]'`. Optional methods:
+Local GGUF models need `pip install 'annotuneagent[models]'`. Optional methods:
 AmbiDose (`denoise=True`, [install](https://github.com/leelieber2025/AmbiDose)),
-scVI and SOLO (`'.[scvi]'`), scFair (`'.[scfair]'`), Harmony, and Scanorama. If
-you select one that is missing, `prepare` prints the install command and
-leaves the matrix unchanged. See [Installation](docs/installation.md).
+scVI and SOLO (`annotuneagent[scvi]`), scFair (`annotuneagent[scfair]`),
+Harmony, and Scanorama. If you select one that is missing, `prepare` prints
+the install command and leaves the matrix unchanged. See
+[Installation](docs/installation.md).
+
+From a checkout: `pip install -e '.[dev]'`.
 
 ## First run
 

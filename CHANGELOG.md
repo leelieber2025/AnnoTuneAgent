@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- PyPI publish workflow. `pip install annotuneagent` after the package is
+  published. Publishing is manual from GitHub Actions.
+
 ## [0.1.0] - 2026-11-09
 
 First public release.
