@@ -6,14 +6,21 @@ Python 3.10–3.13.
 pip install annotuneagent
 ```
 
-From a checkout, `pip install -e .` installs this tree instead.
-
 ```python
 import annotuneagent as ata
 print(ata.__version__)
 ```
 
 The version is set in `src/annotuneagent/_version.py` (currently **0.1.0**).
+
+From a checkout:
+
+```bash
+git clone https://github.com/leelieber2025/AnnoTuneAgent.git
+cd AnnoTuneAgent
+pip install -e ".[dev]"
+pip install -e ".[docs]"
+```
 
 ## Dependencies
 
@@ -31,13 +38,6 @@ package. These are optional:
 
 If you select an optional method and its package is missing, `prepare` prints
 the install command and leaves the matrix unchanged. ComBat is part of Scanpy.
-
-Other extras:
-
-```bash
-pip install -e ".[docs]"    # build this documentation from a checkout
-pip install -e ".[dev]"     # pytest and ruff
-```
 
 ## Model weights
 

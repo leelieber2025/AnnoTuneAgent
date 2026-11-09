@@ -1,8 +1,12 @@
 # AnnoTuneAgent
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![PyPI](https://img.shields.io/pypi/v/annotuneagent.svg)](https://pypi.org/project/annotuneagent/)
+[![PyPI version](https://img.shields.io/pypi/v/annotuneagent.svg)](https://pypi.org/project/annotuneagent/)
+[![PyPI downloads](https://img.shields.io/pepy/dt/annotuneagent.svg?label=PyPI%20downloads)](https://pepy.tech/project/annotuneagent)
+[![Python versions](https://img.shields.io/pypi/pyversions/annotuneagent.svg)](https://pypi.org/project/annotuneagent/)
 [![Documentation](https://app.readthedocs.org/projects/annotuneagent/badge/?version=latest)](https://app.readthedocs.org/projects/annotuneagent/)
+[![CI](https://github.com/leelieber2025/AnnoTuneAgent/actions/workflows/tests.yml/badge.svg)](https://github.com/leelieber2025/AnnoTuneAgent/actions/workflows/tests.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24092828.svg)](https://doi.org/10.5281/zenodo.24092828)
 
 Documentation: [Read the Docs](https://app.readthedocs.org/projects/annotuneagent/).
 
@@ -75,7 +79,13 @@ Harmony, and Scanorama. If you select one that is missing, `prepare` prints
 the install command and leaves the matrix unchanged. See
 [Installation](docs/installation.md).
 
-From a checkout: `pip install -e '.[dev]'`.
+From a checkout:
+
+```bash
+git clone https://github.com/leelieber2025/AnnoTuneAgent.git
+cd AnnoTuneAgent
+pip install -e ".[dev]"
+```
 
 ## First run
 
@@ -145,6 +155,11 @@ The tokenizer is installed with the package. See
 ## Status
 
 **0.1.0 (Alpha).** Import as `import annotuneagent as ata`.
+
+## Citation
+
+For the software record, cite the [Zenodo DOI](https://doi.org/10.5281/zenodo.24092828).
+Pin the package version used in the analysis, for example `annotuneagent==0.1.0`.
 
 ## License
 

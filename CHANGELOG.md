@@ -6,8 +6,9 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
-- PyPI publish workflow. `pip install annotuneagent` after the package is
-  published. Publishing is manual from GitHub Actions.
+- PyPI package `annotuneagent` 0.1.0. `pip install annotuneagent`.
+  Publishing stays manual from GitHub Actions.
+- Zenodo DOI [10.5281/zenodo.24092828](https://doi.org/10.5281/zenodo.24092828).
 
 ## [0.1.0] - 2026-11-09
 

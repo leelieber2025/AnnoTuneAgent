@@ -1,5 +1,12 @@
 # AnnoTuneAgent Documentation
 
+[![PyPI version](https://img.shields.io/pypi/v/annotuneagent.svg)](https://pypi.org/project/annotuneagent/)
+[![PyPI downloads](https://img.shields.io/pepy/dt/annotuneagent.svg?label=PyPI%20downloads)](https://pepy.tech/project/annotuneagent)
+[![Python versions](https://img.shields.io/pypi/pyversions/annotuneagent.svg)](https://pypi.org/project/annotuneagent/)
+[![CI](https://github.com/leelieber2025/AnnoTuneAgent/actions/workflows/tests.yml/badge.svg)](https://github.com/leelieber2025/AnnoTuneAgent/actions/workflows/tests.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/leelieber2025/AnnoTuneAgent/blob/main/LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24092828.svg)](https://doi.org/10.5281/zenodo.24092828)
+
 AnnoTuneAgent annotates clustered scRNA-seq. `prepare` runs QC, gene
 selection, and Leiden clustering. `run` collects three results for each
 cluster: a marker score, a name-model result, and an ML-model result. A
