@@ -1,11 +1,13 @@
 # Copyright 2026 Zhao Li (李钊)
 # Licensed under the Apache License, Version 2.0
 
-"""Decisions for clusters the marker rules leave uncertain.
+"""Name and ML results for one cluster.
 
-The local model tries to resolve the cluster. A higher model is requested
-only when this one cannot decide. New markers are scored again by the same
-rules before a label is written.
+The name model copies a cell-type name from the marker dictionary. The ML
+model reads measured differential expression and candidate marker panels, and
+copies a name from those candidates. Both return a result when a model chain
+is supplied. The workflow judgment reads those results together with the
+marker score and writes the title.
 """
 
 from __future__ import annotations

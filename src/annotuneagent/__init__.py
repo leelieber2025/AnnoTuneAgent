@@ -15,16 +15,21 @@ Recommended usage::
         models=ata.local_models(model_dir),
     )
 
-``annotate`` scores caller-supplied hypotheses for each cluster. ``run`` scores
-the built-in dictionary, subclusters uncertain clusters once, and writes
-resolved labels to ``annotune_label``. Models run only when a
-``ModelChain`` is supplied. ``local_models`` takes the directory containing
-the Q6_K base and the name and ml adapters. The tokenizer is
-installed with the package. The server is ``http://127.0.0.1:8080`` unless
-``url`` or ``ANNOTUNE_URL`` says otherwise. A matching local server is reused.
-Remote name and ML services use separate ``TaskEndpoint(url=...)`` values.
-``attach`` connects to an existing service without loading weights. Annotation
-calls name and ml. The written name follows Cell Ontology lineage and the marker score.
+``annotate`` scores caller-supplied hypotheses for each cluster. ``run``
+collects three results, the marker score, the name model, and the ML model,
+then a judgment writes the title to ``annotune_label``. The title is a
+dictionary name. A cluster can stay unnamed. Uncertain clusters are
+subclustered once. The name and ML models run when a ``ModelChain`` is
+supplied. The name model copies a cell-type name from the marker dictionary.
+The ML model is trained on machine-learning measurements of the cluster,
+differential expression and marker-panel statistics, and copies a name from
+those candidates.
+``local_models`` takes the directory containing the Q6_K base and the name and
+ml adapters. The tokenizer is installed with the package. The server is
+``http://127.0.0.1:8080`` unless ``url`` or ``ANNOTUNE_URL`` says otherwise.
+A matching local server is reused. Remote name and ML services use separate
+``TaskEndpoint(url=...)`` values. ``attach`` connects to an existing service
+without loading weights.
 """
 
 from __future__ import annotations

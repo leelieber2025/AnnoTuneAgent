@@ -143,7 +143,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--resolution", type=float, help="Leiden resolution; default 0.4")
     parser.add_argument(
-        "--n-pcs", type=int, help="principal components; default is the variance elbow"
+        "--n-pcs",
+        type=int,
+        help="PCA count, or the scVI latent size; default is the variance elbow, or 30 for scvi and scvi+harmony",
     )
     parser.add_argument("--n-top-genes", type=int, help="highly variable genes; default 2000")
     parser.add_argument(
@@ -170,9 +172,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--catalog",
         type=Path,
-        help="full candidate pool the model may nominate; defaults to the species dictionary",
+        help="extra dictionary types scored when a cluster is unresolved; with --species, the species dictionary",
     )
-    parser.add_argument("--species", choices=["human", "mouse"], help="required with --types")
+    parser.add_argument(
+        "--species",
+        choices=["human", "mouse"],
+        help="human or mouse; required for --prepare, --tissue, and --types",
+    )
     parser.add_argument("--tissue", help="adds that tissue page to the core dictionary")
     parser.add_argument(
         "--list-tissues",

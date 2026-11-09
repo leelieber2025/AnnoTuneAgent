@@ -1,7 +1,7 @@
 # Copyright 2026 Zhao Li (李钊)
 # Licensed under the Apache License, Version 2.0
 
-"""Cluster workflow: score, subcluster once, and write resolved cell labels."""
+"""Cluster workflow: marker, name, and ML results, then a judgment writes the title."""
 
 from __future__ import annotations
 
@@ -847,20 +847,25 @@ def run(
     dotplot_path: Path | str | None = None,
     show: bool = False,
 ) -> dict[str, object]:
-    """Score clusters, then run the name and ml models.
+    """Collect the marker, name, and ML results, then write the title.
 
-    Clear clusters are written to ``label_key``. Uncertain clusters are
-    subclustered once. Name and ML each receive their own payload. The
-    written name follows Cell Ontology lineage and the marker score. Each step
-    prints when it starts and how many seconds it took. A cluster with no
-    written name, or a written name that still has a hint, prints a gene query
-    that can be pasted into another model. A local server started for the
-    adapters stays loaded after this call.
+    The marker score, the name model, and the ML model each return a result.
+    A judgment reads the three results and writes the title. The title is a
+    dictionary name. A cluster can stay unnamed. The name and ML models run
+    when ``models`` is set. The name model copies a cell-type name from the
+    marker dictionary. The ML model is trained on machine-learning measurements
+    of the cluster, differential expression and marker-panel statistics, and
+    copies a name from those candidates. Name and ML each receive their own
+    payload. Clear clusters are written to ``label_key``. Uncertain clusters
+    are subclustered once. Each step prints when it starts and how many seconds
+    it took. A cluster with no written name, or a written name that still has a
+    hint, prints a gene query that can be pasted into another model. A local
+    server started for the adapters stays loaded after this call.
 
     With ``models``, the name and ML models are asked for every cluster, or
-    only those in ``model_clusters``. That includes clusters the marker rule
-    already labeled. Their replies are settled with the marker call, so a
-    cluster with two detected programs can lose its marker label.
+    only those in ``model_clusters``. That includes clusters the marker score
+    already named. The judgment reads all three results and can write a
+    different title.
 
     ``adata`` is changed in place. This writes ``obs`` columns ``label_key``,
     ``annotune_cluster``, ``annotune_final_status`` and ``annotune_hint``, and

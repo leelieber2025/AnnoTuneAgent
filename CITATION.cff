@@ -1,8 +1,14 @@
 cff-version: 1.2.0
-title: "AnnoTuneAgent: cluster-level cell-type annotation from marker evidence"
+title: "AnnoTuneAgent: cluster-level cell-type annotation"
 message: >-
   If you use this software, please cite the software record below and pin
   the package version used in the analysis.
+abstract: >-
+  Collects a marker score, a name-model result, and an ML-model result for
+  each cluster. A judgment reads the three results and writes the title.
+  The title is a dictionary name. The name model reads dictionary marker
+  hits. The ML model is trained on differential expression and marker-panel
+  statistics.
 type: software
 authors:
   - family-names: "Li"

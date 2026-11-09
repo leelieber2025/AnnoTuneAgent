@@ -24,10 +24,16 @@ First public release.
   `doublet_chip` is `"10k"` (0.8% multiplets per 1,000 recovered cells) or
   `"20k"` (0.4% per 1,000). `solo_expected_rates` replaces that rate.
   AmbiDose, when enabled, runs per sample.
-- `run` scores the built-in human and mouse marker dictionary and can call
-  the name and ML models. A cluster with two programs and fewer than 40
-  cells keeps the name when marker, name, and ML agree. An unclear cluster
-  can take the title of the one clear cluster it touches.
+- `run` collects three results for each cluster: the marker score, the name
+  model, and the ML model. A judgment reads those results and writes the
+  title. The title is a dictionary name. The name and ML models run when a
+  model chain is passed. The name model copies a name from the marker
+  dictionary. The ML model is trained on machine-learning measurements of
+  the cluster (differential expression and marker-panel statistics) and
+  copies a name from those candidates. A cluster can stay unnamed. A cluster
+  with two programs and fewer than 40 cells keeps the name when marker,
+  name, and ML agree. An unclear cluster can take the title of the one clear
+  cluster it touches.
 - `annotate` scores caller-supplied positive and negative markers.
   `evaluate` compares cluster labels with a majority author label.
 - The CLI entry point is `annotuneagent`.
