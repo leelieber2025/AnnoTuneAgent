@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- The load-model tutorial points Windows users to
+  [AnnoTuneLoader](https://github.com/leelieber2025/AnnoTuneLoader).
+
 ### Fixed
 
 - A running server is checked with `/props` and `/lora-adapters` when `/proc`
