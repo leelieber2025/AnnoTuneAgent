@@ -481,11 +481,11 @@ def test_cli_model_nominates_a_dictionary_type_and_writes_it(tmp_path: Path, mon
     )
     seen = []
 
-    def nominate_name(_url, payload):
+    def nominate_name(_url, payload, **_extra):
         seen.append(payload)
         return Decision("retest", ("CD4 T",))
 
-    def nominate_ml(_url, payload):
+    def nominate_ml(_url, payload, **_extra):
         assert "marker" not in payload
         from annotuneagent.decide import MlResult
 
@@ -544,11 +544,11 @@ def test_cli_model_path_saves_unresolved_cells(tmp_path: Path, monkeypatch):
     hypotheses.write_text(json.dumps([{"name": "A", "positive": ["A"]}]))
     calls = []
 
-    def no_name(url, _payload):
+    def no_name(url, _payload, **_extra):
         calls.append("name:" + url)
         return Decision("retest", ("A",))
 
-    def ml(url, _payload):
+    def ml(url, _payload, **_extra):
         calls.append(url)
         from annotuneagent.decide import MlResult
 
@@ -607,10 +607,11 @@ def test_cli_writes_a_marker_name_that_name_and_ml_repeat(tmp_path: Path, monkey
     hypotheses.write_text(json.dumps([{"name": "A cell", "positive": ["A"]}]))
     monkeypatch.setattr(
         "annotuneagent.workflow.fetch_name",
-        lambda _url, _payload: Decision("retest", ("A cell",)),
+        lambda _url, _payload, **_extra: Decision("retest", ("A cell",)),
     )
     monkeypatch.setattr(
-        "annotuneagent.workflow.fetch_ml", lambda _url, _payload: MlResult("named", ("A cell",))
+        "annotuneagent.workflow.fetch_ml",
+        lambda _url, _payload, **_extra: MlResult("named", ("A cell",)),
     )
     assert (
         main(

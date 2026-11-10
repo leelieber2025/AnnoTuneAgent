@@ -69,7 +69,8 @@ class TaskEndpoint:
     adapter: str | None = None
     system: str = ""
     ask: Callable | None = None
-    maxlen: int = 2048
+    # None uses 2048 for name and 8192 for ML. An ML prompt does not fit in 2048.
+    maxlen: int | None = None
     base: str = ""
     tokenizer: str | None = None
     server: str | None = None
@@ -87,8 +88,10 @@ def local_models(
     """Q6_K base and the name and ML adapters.
 
     ``url`` is the server root. The default is ``http://127.0.0.1:8080``.
-    A server is reused only when its base and both adapters match.
-    The tokenizer is the one installed with the package.
+    A server is reused only when its base, both adapters, and context match.
+    The check reads the process list, or ``/props`` and ``/lora-adapters``
+    when that list is unavailable. The tokenizer is the one installed with
+    the package.
     """
     from .local_lora import packaged_tokenizer, service_url
 
@@ -1521,18 +1524,30 @@ def _run_models(
     return found
 
 
+def _task_maxlen(endpoint: TaskEndpoint, task: str) -> int:
+    if endpoint.maxlen is not None:
+        return endpoint.maxlen
+    return 8192 if task == "ml" else 2048
+
+
 def _invoke(endpoint: TaskEndpoint, payload: dict, fetch, parse, system: str, task: str):
     """Ask one task. ``fetch(url, payload)`` serves a URL. ``parse(text, payload)`` reads local text."""
     try:
         if endpoint.ask is not None:
             return endpoint.ask(payload), None
+        limit = _task_maxlen(endpoint, task)
         if endpoint.adapter:
             from .local_lora import complete
 
-            text = complete(task, endpoint.system or system, payload, maxlen=endpoint.maxlen)
+            text = complete(task, endpoint.system or system, payload, maxlen=limit)
             return parse(text, payload), None
         if endpoint.url:
-            return fetch(endpoint.url, payload), None
+            return fetch(
+                endpoint.url,
+                payload,
+                maxlen=limit,
+                tokenizer=endpoint.tokenizer,
+            ), None
         raise ValueError("task needs a url, an adapter, or an ask function")
     except Exception as exc:
         if _is_runtime_failure(exc):

@@ -1167,13 +1167,55 @@ def test_local_reply_that_starts_with_http_is_parsed_not_fetched(monkeypatch):
     assert (result, error, fetched) == ("http://not-a-url", None, [])
 
 
+def test_url_ml_uses_8192_when_maxlen_is_omitted():
+    from annotuneagent.workflow import _invoke
+
+    seen = {}
+
+    def fetch(url, payload, **extra):
+        seen["url"] = url
+        seen.update(extra)
+        return "ok"
+
+    result, error = _invoke(
+        TaskEndpoint(url="http://127.0.0.1:1"),
+        {"a": 1},
+        fetch,
+        lambda *_a: pytest.fail("a URL endpoint must not parse local text"),
+        "system",
+        "ml",
+    )
+    assert result == "ok" and error is None
+    assert seen["maxlen"] == 8192
+
+
+def test_explicit_maxlen_is_kept():
+    from annotuneagent.workflow import _invoke
+
+    seen = {}
+
+    def fetch(_url, _payload, **extra):
+        seen.update(extra)
+        return "ok"
+
+    _invoke(
+        TaskEndpoint(url="http://127.0.0.1:1", maxlen=2048),
+        {},
+        fetch,
+        lambda *_a: None,
+        "system",
+        "ml",
+    )
+    assert seen["maxlen"] == 2048
+
+
 def test_url_endpoint_fetches_and_never_parses():
     from annotuneagent.workflow import _invoke
 
     result, error = _invoke(
         TaskEndpoint(url="http://127.0.0.1:1"),
         {"a": 1},
-        lambda url, payload: (url, payload),
+        lambda url, payload, **_extra: (url, payload),
         lambda *_a: pytest.fail("a URL endpoint must not parse local text"),
         "system",
         "name",

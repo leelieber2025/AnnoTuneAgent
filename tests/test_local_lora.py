@@ -223,6 +223,136 @@ def test_private_dir_refuses_a_symlink(tmp_path):
         ll._private_dir(link)
 
 
+def test_reuses_a_server_described_over_http(monkeypatch, tmp_path):
+    base = tmp_path / "base.gguf"
+    name = tmp_path / "name.gguf"
+    ml = tmp_path / "ml.gguf"
+    for path in (base, name, ml):
+        path.write_bytes(b"x")
+    adapters = {"name": str(name), "ml": str(ml)}
+    monkeypatch.setattr(ll, "_health_ok", lambda url: True)
+    monkeypatch.setattr(ll, "_models_ok", lambda url: False)
+    monkeypatch.setattr(ll, "_loaded_servers", lambda: [])
+
+    def get(url, path):
+        assert url == "http://127.0.0.1:8080"
+        if path == "/props":
+            return {
+                "model_path": str(base.resolve()) + "/",
+                "default_generation_settings": {"n_ctx": 8192},
+            }
+        if path == "/lora-adapters":
+            return [
+                {"id": 1, "path": str(ml.resolve()), "scale": 1.0},
+                {"id": 0, "path": str(name.resolve()), "scale": 1.0},
+            ]
+        return None
+
+    def fail(*_args, **_kwargs):
+        raise AssertionError("started a second server")
+
+    monkeypatch.setattr(ll, "_get_json", get)
+    monkeypatch.setattr(ll.subprocess, "Popen", fail)
+    ll.open_adapters(adapters, gguf=str(base), tokenizer="/tok")
+    assert ll._SERVER["mode"] == "llama"
+    assert ll._SERVER["owned"] is False
+    assert ll._SERVER["proc"].pid == -1
+    assert ll._SERVER["ctx"] == 8192
+    assert ll.local_server() == "http://127.0.0.1:8080"
+    assert not ll._STATE.exists()
+    ll.open_adapters(adapters, gguf=str(base), tokenizer="/tok")
+
+
+def test_http_description_rejects_a_different_context(monkeypatch, tmp_path):
+    base = tmp_path / "base.gguf"
+    base.write_bytes(b"x")
+    monkeypatch.setattr(ll, "_health_ok", lambda url: True)
+    monkeypatch.setattr(ll, "_loaded_servers", lambda: [])
+    monkeypatch.setattr(
+        ll,
+        "_get_json",
+        lambda url, path: {
+            "/props": {
+                "model_path": str(base.resolve()),
+                "default_generation_settings": {"n_ctx": 2048},
+            },
+            "/lora-adapters": [
+                {"id": 0, "path": str(Path("name.gguf").resolve())},
+                {"id": 1, "path": str(Path("ml.gguf").resolve())},
+            ],
+        }[path],
+    )
+    with pytest.raises(RuntimeError, match="different GGUF"):
+        ll.open_adapters(_ADAPTERS, gguf=str(base))
+    assert ll._SERVER is None
+
+
+def test_http_description_must_be_readable(monkeypatch, tmp_path):
+    base = tmp_path / "base.gguf"
+    base.write_bytes(b"x")
+    monkeypatch.setattr(ll, "_health_ok", lambda url: True)
+    monkeypatch.setattr(ll, "_loaded_servers", lambda: [])
+    monkeypatch.setattr(ll, "_get_json", lambda url, path: None)
+    with pytest.raises(RuntimeError, match="cannot be verified"):
+        ll.open_adapters(_ADAPTERS, gguf=str(base))
+
+
+def test_alive_on_windows_does_not_signal(monkeypatch):
+    monkeypatch.setattr(ll.os, "name", "nt")
+    monkeypatch.setattr(ll, "_windows_alive", lambda pid: pid == 7)
+
+    def boom(*_a, **_k):
+        raise AssertionError("os.kill")
+
+    monkeypatch.setattr(ll.os, "kill", boom)
+    assert ll._alive(7) is True
+    assert ll._alive(3) is False
+    assert ll._alive(0) is False
+
+
+def test_request_timeout_is_configurable(monkeypatch):
+    assert ll.request_timeout() == 600
+    assert ll.request_timeout(10) == 10
+    monkeypatch.setenv("ANNOTUNE_TIMEOUT", "300")
+    assert ll.request_timeout() == 300
+    monkeypatch.setenv("ANNOTUNE_TIMEOUT", "nope")
+    assert ll.request_timeout() == 600
+
+
+def test_complete_url_enables_one_adapter(monkeypatch):
+    seen = {}
+
+    def post(url, path, payload, timeout=None):
+        seen["url"] = url
+        seen["path"] = path
+        seen["payload"] = payload
+        seen["timeout"] = timeout
+        return {"content": ' {"names": []} ', "tokens_evaluated": 4, "tokens_predicted": 2}
+
+    monkeypatch.setattr(ll, "render_prompt", lambda system, user, tokenizer=None: "PROMPT")
+    monkeypatch.setattr(ll, "prompt_tokens", lambda prompt, tokenizer=None: 8)
+    monkeypatch.setattr(ll, "_post_url", post)
+    text = ll.complete_url("http://127.0.0.1:8080/", "ml", "system", {"a": 1}, maxlen=8192)
+    assert text == '{"names": []}'
+    assert seen["path"] == "/completion"
+    assert seen["payload"]["lora"] == [{"id": 0, "scale": 0.0}, {"id": 1, "scale": 1.0}]
+    assert seen["payload"]["prompt"] == "PROMPT"
+    assert seen["timeout"] is None
+    assert ll.last_call()["tokens"] == 8
+
+
+def test_complete_url_refuses_a_long_prompt(monkeypatch):
+    monkeypatch.setattr(ll, "render_prompt", lambda *_a, **_k: "PROMPT")
+    monkeypatch.setattr(ll, "prompt_tokens", lambda *_a, **_k: 3000)
+
+    def fail(*_args, **_kwargs):
+        raise AssertionError("posted")
+
+    monkeypatch.setattr(ll, "_post_url", fail)
+    with pytest.raises(ll.SequenceTooLong):
+        ll.complete_url("http://127.0.0.1:8080", "name", "system", "user", maxlen=2048)
+
+
 def test_state_in_a_shared_directory_is_not_read(tmp_path, monkeypatch):
     shared = tmp_path / "shared"
     shared.mkdir()

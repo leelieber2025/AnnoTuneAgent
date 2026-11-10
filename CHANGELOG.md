@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- A running server is checked with `/props` and `/lora-adapters` when `/proc`
+  is unavailable, so Windows and macOS can reuse a server this package did
+  not start.
+- A `TaskEndpoint` URL calls `/completion` and enables one LoRA adapter for
+  that request. When `maxlen` is omitted, name allows 2048 tokens and ML
+  allows 8192. An ML prompt does not fit in the name limit.
+- A model request waits 600 seconds. `ANNOTUNE_TIMEOUT` or the `timeout`
+  argument overrides it. Health checks stay at 2 seconds.
+- On Windows, a process check does not call `os.kill`.
+
 ### Added
 
 - PyPI package `annotuneagent` 0.1.0. `pip install annotuneagent`.

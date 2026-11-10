@@ -27,9 +27,12 @@ those candidates.
 ``local_models`` takes the directory containing the Q6_K base and the name and
 ml adapters. The tokenizer is installed with the package. The server is
 ``http://127.0.0.1:8080`` unless ``url`` or ``ANNOTUNE_URL`` says otherwise.
-A matching local server is reused. Remote name and ML services use separate
-``TaskEndpoint(url=...)`` values. ``attach`` connects to an existing service
-without loading weights.
+A matching server is reused. When the process list is unavailable, the check
+reads ``/props`` and ``/lora-adapters``. ``TaskEndpoint(url=...)`` calls
+``/completion`` on that server and enables one adapter per request.
+``attach`` connects to an existing service without loading weights.
+Model requests wait 600 seconds unless ``timeout`` or ``ANNOTUNE_TIMEOUT``
+says otherwise.
 """
 
 from __future__ import annotations

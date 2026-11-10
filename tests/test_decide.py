@@ -192,6 +192,20 @@ def test_chat_reply_without_choices_is_a_runtime_error(monkeypatch):
         decide.post_chat("http://x", "system", {"a": 1})
 
 
+def test_fetch_name_reads_a_completion(monkeypatch):
+    from annotuneagent import decide
+
+    monkeypatch.setattr(
+        "annotuneagent.local_lora.complete_url",
+        lambda url, task, system, payload, *, maxlen, timeout, tokenizer: json.dumps(
+            {"action": "retest", "names": ["T cell"]}
+        ),
+    )
+    decision = decide.fetch_name("http://127.0.0.1:8080", {"dictionary_hits": [{"name": "T cell"}]})
+    assert decision.action == "retest"
+    assert decision.names == ("T cell",)
+
+
 def test_rank_measurements_reads_detection_for_ranked_genes():
     import numpy as np
     import pandas as pd

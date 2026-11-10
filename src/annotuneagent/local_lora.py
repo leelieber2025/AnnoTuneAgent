@@ -35,8 +35,11 @@ _RUN_DIR = (
 _STATE = _RUN_DIR / "llama-server.json"
 _LOG = _RUN_DIR / "llama-server.log"
 _DEFAULT_SERVICE = "http://127.0.0.1:8080"
+# A long ML sample on a P1000 can take about two minutes. Health probes stay short.
+_DEFAULT_TIMEOUT = 600
 _SERVER: dict | None = None
 _LAST: dict = {}
+_TOKENIZERS: dict = {}
 
 
 class _Running:
@@ -72,6 +75,15 @@ class _Remote:
 
 
 def _alive(pid: int) -> bool:
+    """True when ``pid`` is still running.
+
+    On Windows ``os.kill(pid, 0)`` terminates the process, so the check uses
+    the process handle instead.
+    """
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        return _windows_alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -79,6 +91,30 @@ def _alive(pid: int) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def _windows_alive(pid: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.OpenProcess(0x1000, False, pid)
+    if not handle:
+        # Access denied means the process exists and this user cannot query it.
+        return ctypes.get_last_error() == 5
+    try:
+        code = wintypes.DWORD()
+        if not kernel.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return ctypes.get_last_error() == 5
+        return int(code.value) == 259
+    finally:
+        kernel.CloseHandle(handle)
 
 
 class SequenceTooLong(RuntimeError):
@@ -113,6 +149,19 @@ def _tokenizer_dir(path: str | None) -> str:
 def service_url() -> str:
     """Server root. ``ANNOTUNE_URL`` overrides ``http://127.0.0.1:8080``."""
     return _base_url(os.environ.get("ANNOTUNE_URL", _DEFAULT_SERVICE))
+
+
+def request_timeout(timeout: float | None = None) -> float:
+    """Seconds for one model request. ``ANNOTUNE_TIMEOUT`` overrides the default."""
+    if timeout is not None:
+        return float(timeout)
+    raw = os.environ.get("ANNOTUNE_TIMEOUT")
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return float(_DEFAULT_TIMEOUT)
 
 
 def attach(url: str | None = None, *, tokenizer: str | None = None) -> str:
@@ -236,36 +285,53 @@ def complete(task: str, system: str, payload: dict | str, *, maxlen: int) -> str
     from .decide import user_text
 
     user = user_text(task, payload)
-    prompt = _render(system, user)
-    tokens = len(_tokenizer()(prompt, add_special_tokens=False).input_ids)
+    prompt = render_prompt(system, user, runtime_tokenizer())
+    tokens = prompt_tokens(prompt, runtime_tokenizer())
     if tokens + 32 > maxlen:
         raise SequenceTooLong(tokens, maxlen)
     runtime = _SERVER
     if runtime.get("mode") == "chat":
         from .decide import post_chat
 
-        text = str(post_chat(runtime["url"], system, payload, 180, task=task)).strip()
+        text = str(post_chat(runtime["url"], system, payload, request_timeout(), task=task)).strip()
         scales: list[dict[str, float]] = []
         evaluated = None
         predicted = None
     else:
         scales = scales_for(task)
-        raw = _post(
-            "/completion",
-            {
-                "prompt": prompt,
-                "n_predict": 32,
-                "temperature": 0,
-                "top_k": 1,
-                "top_p": 1,
-                "min_p": 0,
-                "cache_prompt": False,
-                "lora": scales,
-            },
-        )
-        text = str(raw.get("content") or "").strip()
-        evaluated = raw.get("tokens_evaluated")
-        predicted = raw.get("tokens_predicted")
+        text, evaluated, predicted = _completion(runtime["url"], prompt, scales)
+    global _LAST
+    _LAST = {
+        "task": task,
+        "lora": scales,
+        "tokens": tokens,
+        "tokens_evaluated": evaluated,
+        "tokens_predicted": predicted,
+    }
+    return text
+
+
+def complete_url(
+    url: str,
+    task: str,
+    system: str,
+    payload: dict | str,
+    *,
+    maxlen: int,
+    timeout: float | None = None,
+    tokenizer: str | None = None,
+) -> str:
+    """One greedy ``/completion``. ``task`` is enabled and the other adapter is off."""
+    if task not in _TASKS:
+        raise ValueError(f"unknown task {task}")
+    from .decide import user_text
+
+    prompt = render_prompt(system, user_text(task, payload), tokenizer)
+    tokens = prompt_tokens(prompt, tokenizer)
+    if tokens + 32 > maxlen:
+        raise SequenceTooLong(tokens, maxlen)
+    scales = scales_for(task)
+    text, evaluated, predicted = _completion(url, prompt, scales, timeout=timeout)
     global _LAST
     _LAST = {
         "task": task,
@@ -443,24 +509,41 @@ def _use_existing(
     if mode is None:
         return False
     loaded = _server_on(url) if mode == "llama" else None
+    if loaded is None and mode == "llama" and adapters is not None:
+        loaded = _described_server(url)
     if adapters is not None:
         if loaded is None:
             raise RuntimeError(
                 f"server at {url} is already running but its GGUF and adapters cannot be verified"
             )
         _require_matching_model(loaded, str(gguf), adapters, ctx)
-    if loaded is not None:
+    if loaded is not None and int(loaded.get("pid") or 0) > 0:
         _connect_loaded(loaded, tokenizer)
+    elif loaded is not None:
+        _connect_described(loaded, tokenizer)
     else:
         _connect_remote(url, tokenizer, mode)
     print(f"server already loaded at {url}; not loading again", flush=True)
     return True
 
 
+def _same_path(left: str, right: str) -> bool:
+    if os.path.normcase(os.path.normpath(left)) == os.path.normcase(os.path.normpath(right)):
+        return True
+    try:
+        return Path(left).resolve() == Path(right).resolve()
+    except OSError:
+        return False
+
+
 def _require_matching_model(loaded: dict, gguf: str, adapters: dict[str, str], ctx: int) -> None:
+    loaded_adapters = loaded.get("adapters") or {}
+    same = set(loaded_adapters) == set(adapters) and all(
+        _same_path(str(loaded_adapters.get(name) or ""), path) for name, path in adapters.items()
+    )
     if (
-        loaded.get("gguf") != gguf
-        or loaded.get("adapters") != adapters
+        not _same_path(str(loaded.get("gguf") or ""), gguf)
+        or not same
         or int(loaded.get("ctx") or 0) < ctx
     ):
         raise RuntimeError("server already runs different GGUF, adapters, or context")
@@ -481,6 +564,25 @@ def _connect_loaded(loaded: dict, tokenizer: str) -> None:
         log=None,
     )
     _write_state()
+
+
+def _connect_described(loaded: dict, tokenizer: str) -> None:
+    """Attach using paths from ``/props`` and ``/lora-adapters``. No process id."""
+    global _SERVER
+    url = str(loaded["url"])
+    _host, port = _split_host(url)
+    _SERVER = _runtime(
+        _Remote(url),
+        url=url,
+        port=int(loaded.get("port") or port),
+        gguf=str(loaded.get("gguf") or ""),
+        adapters=dict(loaded.get("adapters") or {}),
+        ctx=int(loaded.get("ctx") or 0),
+        tokenizer=tokenizer,
+        mode="llama",
+        owned=False,
+        log=None,
+    )
 
 
 def _connect_remote(url: str, tokenizer: str, mode: str) -> None:
@@ -512,6 +614,51 @@ def _server_on(url: str) -> dict | None:
         if item["url"] == url:
             return item
     return None
+
+
+def _described_server(url: str) -> dict | None:
+    """Base, adapter paths, and context reported by llama-server."""
+    props = _get_json(url, "/props")
+    listed = _get_json(url, "/lora-adapters")
+    if not isinstance(props, dict) or not isinstance(listed, list):
+        return None
+    gguf = str(props.get("model_path") or "")
+    settings = props.get("default_generation_settings")
+    ctx = 0
+    if isinstance(settings, dict):
+        try:
+            ctx = int(settings.get("n_ctx") or 0)
+        except (TypeError, ValueError):
+            ctx = 0
+    ordered: list[tuple[int, str]] = []
+    for item in listed:
+        if not isinstance(item, dict) or "id" not in item:
+            continue
+        try:
+            index = int(item["id"])
+        except (TypeError, ValueError):
+            continue
+        ordered.append((index, str(item.get("path") or "")))
+    ordered.sort()
+    if not gguf or [index for index, _path in ordered] != [0, 1]:
+        return None
+    _host, port = _split_host(url)
+    return {
+        "port": port,
+        "url": url,
+        "gguf": gguf,
+        "adapters": dict(zip(_TASKS, (path for _index, path in ordered), strict=True)),
+        "ctx": ctx,
+    }
+
+
+def _get_json(url: str, path: str):
+    try:
+        with urllib.request.urlopen(f"{url}{path}", timeout=2) as resp:
+            body = json.loads(resp.read().decode())
+    except (OSError, urllib.error.URLError, json.JSONDecodeError, TimeoutError):
+        return None
+    return body
 
 
 def _loaded_servers() -> list[dict]:
@@ -664,19 +811,27 @@ def _tail(path: Path) -> str:
     return "\n".join(lines[-40:])
 
 
-def _tokenizer():
+def runtime_tokenizer() -> str | None:
     runtime = _SERVER
     if runtime is None:
-        raise RuntimeError("shared base is not loaded")
-    if runtime["tok"] is None:
+        return None
+    return runtime.get("tokenizer")
+
+
+def load_tokenizer(path: str | None = None):
+    key = _tokenizer_dir(path)
+    tok = _TOKENIZERS.get(key)
+    if tok is None:
         from transformers import AutoTokenizer
 
-        runtime["tok"] = AutoTokenizer.from_pretrained(runtime["tokenizer"])
-    return runtime["tok"]
+        tok = AutoTokenizer.from_pretrained(key)
+        _TOKENIZERS[key] = tok
+    return tok
 
 
-def _render(system: str, user: str) -> str:
-    return _tokenizer().apply_chat_template(
+def render_prompt(system: str, user: str, tokenizer: str | None = None) -> str:
+    """Chat prompt with thinking disabled. The server is started with ``--no-jinja``."""
+    return load_tokenizer(tokenizer).apply_chat_template(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
         tokenize=False,
         add_generation_prompt=True,
@@ -684,19 +839,44 @@ def _render(system: str, user: str) -> str:
     )
 
 
-def _post(path: str, payload: dict) -> dict:
-    runtime = _SERVER
-    if runtime is None:
-        raise RuntimeError("shared base is not loaded")
+def prompt_tokens(prompt: str, tokenizer: str | None = None) -> int:
+    return len(load_tokenizer(tokenizer)(prompt, add_special_tokens=False).input_ids)
+
+
+def _completion(
+    url: str, prompt: str, scales: list[dict[str, float]], timeout: float | None = None
+) -> tuple[str, object, object]:
+    raw = _post_url(
+        url,
+        "/completion",
+        {
+            "prompt": prompt,
+            "n_predict": 32,
+            "temperature": 0,
+            "top_k": 1,
+            "top_p": 1,
+            "min_p": 0,
+            "cache_prompt": False,
+            "lora": scales,
+        },
+        timeout=timeout,
+    )
+    text = str(raw.get("content") or "").strip()
+    if not text:
+        raise RuntimeError("llama-server reply has no content")
+    return text, raw.get("tokens_evaluated"), raw.get("tokens_predicted")
+
+
+def _post_url(url: str, path: str, payload: dict, timeout: float | None = None) -> dict:
     data = json.dumps(payload).encode()
     request = urllib.request.Request(
-        f"{runtime['url']}{path}",
+        f"{url}{path}",
         data=data,
         headers={"Content-Type": "application/json"},
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=180) as resp:
+        with urllib.request.urlopen(request, timeout=request_timeout(timeout)) as resp:
             body = json.loads(resp.read().decode())
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(errors="replace")

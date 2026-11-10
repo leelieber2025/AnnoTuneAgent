@@ -628,10 +628,27 @@ def hit_names(payload: dict[str, object]) -> set[str]:
     return {str(item["name"]) for item in payload.get("dictionary_hits") or []}
 
 
-def fetch_name(url: str, payload: dict[str, object], timeout: float = 60) -> Decision:
-    return parse_decision(
-        post_chat(url, SYSTEM_NAME, payload, timeout, task="name"), hit_names(payload)
+def fetch_name(
+    url: str,
+    payload: dict[str, object],
+    timeout: float | None = None,
+    *,
+    maxlen: int = 2048,
+    tokenizer: str | None = None,
+) -> Decision:
+    """Name task on ``/completion``. One adapter is enabled for this request."""
+    from .local_lora import complete_url
+
+    text = complete_url(
+        url,
+        "name",
+        SYSTEM_NAME,
+        payload,
+        maxlen=maxlen,
+        timeout=timeout,
+        tokenizer=tokenizer,
     )
+    return parse_decision(text, hit_names(payload))
 
 
 def candidate_names(payload: dict[str, object]) -> set[str]:
@@ -644,11 +661,27 @@ def candidate_names(payload: dict[str, object]) -> set[str]:
     return names
 
 
-def fetch_ml(url: str, payload: dict[str, object], timeout: float = 120) -> MlResult:
-    return parse_ml(
-        post_chat(url, SYSTEM_ML, payload, timeout, task="ml"),
-        candidate_names(payload),
+def fetch_ml(
+    url: str,
+    payload: dict[str, object],
+    timeout: float | None = None,
+    *,
+    maxlen: int = 8192,
+    tokenizer: str | None = None,
+) -> MlResult:
+    """ML task on ``/completion``. One adapter is enabled for this request."""
+    from .local_lora import complete_url
+
+    text = complete_url(
+        url,
+        "ml",
+        SYSTEM_ML,
+        payload,
+        maxlen=maxlen,
+        timeout=timeout,
+        tokenizer=tokenizer,
     )
+    return parse_ml(text, candidate_names(payload))
 
 
 def _negative_high(row: dict | None) -> bool:
