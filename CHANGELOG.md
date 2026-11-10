@@ -4,12 +4,7 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-### Changed
-
-- The load-model tutorial points Windows users to
-  [AnnoTuneLoader](https://github.com/leelieber2025/AnnoTuneLoader).
-- A tutorial explains each field of the `run` report. The `Queries` paragraph
-  is text to paste into another model.
+## [0.1.1] - 2026-11-09
 
 ### Fixed
 
@@ -23,11 +18,12 @@ All notable changes to this project are documented in this file.
   argument overrides it. Health checks stay at 2 seconds.
 - On Windows, a process check does not call `os.kill`.
 
-### Added
+### Changed
 
-- PyPI package `annotuneagent` 0.1.0. `pip install annotuneagent`.
-  Publishing stays manual from GitHub Actions.
-- Zenodo DOI [10.5281/zenodo.24092828](https://doi.org/10.5281/zenodo.24092828).
+- The load-model tutorial points Windows users to
+  [AnnoTuneLoader](https://github.com/leelieber2025/AnnoTuneLoader).
+- A tutorial explains each field of the `run` report. The `Queries` paragraph
+  is text to paste into another model.
 
 ## [0.1.0] - 2026-11-09
 
