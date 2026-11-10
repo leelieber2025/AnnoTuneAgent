@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file.
 
 - The load-model tutorial points Windows users to
   [AnnoTuneLoader](https://github.com/leelieber2025/AnnoTuneLoader).
+- A tutorial explains each field of the `run` report. The `Queries` paragraph
+  is text to paste into another model.
 
 ### Fixed
 

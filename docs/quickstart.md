@@ -184,6 +184,10 @@ panel, not to each gene separately.
   and UMAP and dotplot calls. Edit the order or labels and rerun the snippet to
   regenerate the plots.
 
+{doc}`tutorials/report` explains every report field. The printed `Queries`
+block is text to paste into another model. The heading is the local note.
+The paragraph under it is the question.
+
 A Cell Ontology id is the exact map row for the written label. An unreviewed id
 is marked pending.
 

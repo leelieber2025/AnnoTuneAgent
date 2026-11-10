@@ -5,10 +5,11 @@ figures and the UMAP. `run` collects the marker score, the name-model result,
 and the ML-model result, and writes the title. The model server stays loaded
 between calls.
 
-| Notebook | Contents |
+| Page | Contents |
 |----------|----------|
 | {doc}`pbmc8k_annotation` | Public PBMC 8k: `prepare`, then the name and ML models |
 | {doc}`load_model` | Download the weights, then use a local server or connect to a remote one |
+| {doc}`report` | What each part of the `run` report is for, including the text to paste |
 
 {doc}`pbmc8k_annotation` uses the public 10x PBMC 8k count matrix (7,750 cells),
 not the Scanpy PBMC 3k set. The matrix contains cells only, so AmbiDose is off.
@@ -42,6 +43,15 @@ Run a local server at `http://127.0.0.1:8080`, or connect to a remote one.
 Needs GGUF files or a running server
 :::
 
+:::{grid-item-card} Read the report
+:link: report
+:link-type: doc
+
+The `Queries` block is text to paste into another model.
++++
+No extra install
+:::
+
 ::::
 
 ```{toctree}
@@ -50,4 +60,5 @@ Needs GGUF files or a running server
 
 pbmc8k_annotation
 load_model
+report
 ```
