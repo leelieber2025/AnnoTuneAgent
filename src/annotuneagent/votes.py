@@ -19,11 +19,22 @@ from .hypotheses import Hypothesis
 VIEWS = ("panel", "genes", "subcluster", "neighbors")
 
 
+def _open_rows(ranking: list[dict]) -> list[dict]:
+    """Rows the receptor gate still allows. A missing flag stays open."""
+    return [row for row in ranking if row.get("eligible") is not False]
+
+
 def panel_vote(record: dict) -> str | None:
     """Top dictionary type when its positives are high and negatives are not."""
-    if record.get("status") == "label" and record.get("cell_type"):
-        return str(record["cell_type"])
     ranking = list(record.get("ranking") or [])
+    if record.get("status") == "label" and record.get("cell_type"):
+        name = str(record["cell_type"])
+        blocked = any(
+            str(row.get("name")) == name and row.get("eligible") is False for row in ranking
+        )
+        if not blocked:
+            return name
+    ranking = _open_rows(ranking)
     if not ranking or float(ranking[0]["score"]) <= 0:
         return None
     for gene in (record.get("evidence") or {}).get("negative") or []:
@@ -39,6 +50,8 @@ def gene_vote(hypotheses: list[Hypothesis], logfc: dict[str, float]) -> str | No
     """Dictionary type whose measured positive markers are relatively high."""
     scored: list[tuple[int, float, str]] = []
     for item in hypotheses:
+        if item.requires_any and not any(logfc.get(gene, 0.0) > 0 for gene in item.requires_any):
+            continue
         present = [gene for gene in item.positive if gene in logfc]
         high = [gene for gene in present if logfc[gene] > 0]
         if not high:

@@ -30,6 +30,13 @@ def _counts():
     return adata
 
 
+def test_neighbors_without_n_neighbors_are_rebuilt():
+    adata = _counts()
+    adata.uns["neighbors"] = {"params": {"method": "umap"}, "connectivities_key": "connectivities"}
+    prepare(adata, species="human", show=False)
+    assert adata.uns["neighbors"]["params"]["n_neighbors"] == 15
+
+
 def test_singular_batch_hvg_is_retried_without_the_batch(monkeypatch):
     calls = []
 

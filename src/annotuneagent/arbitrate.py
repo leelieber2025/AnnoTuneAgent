@@ -23,6 +23,7 @@ class ScoredHypothesis:
     negative: tuple[GeneEvidence, ...]
     score: float
     penalty: float
+    eligible: bool = True
 
     def as_evidence(self) -> dict[str, object]:
         return {
@@ -36,26 +37,33 @@ def score_hypothesis(
     positive: list[GeneEvidence],
     negative: list[GeneEvidence],
     support: list[GeneEvidence] | None = None,
+    required: list[GeneEvidence] | None = None,
 ) -> ScoredHypothesis:
-    # A panel gene detected in fewer than 25% of the cells is absent here.
-    # It stays out of the mean so it cannot dilute a gene that is actually high.
-    detected = [gene for gene in positive if gene.pct_in >= NEGATIVE_PRESENT_PCT]
-    # Two detected genes can be averaged without the absent ones.
-    # One detected gene must not stand in for the whole panel.
-    used = detected if len(detected) >= 2 else positive
-    parts = [positive_contribution(gene) for gene in used]
+    # Every positive gene stays in the mean. A gene detected in fewer than 25%
+    # of the cells contributes 0, so a missing identity gene dilutes genes that
+    # are shared with other types. One detected gene cannot stand for the panel.
+    parts = [
+        positive_contribution(gene) if gene.pct_in >= NEGATIVE_PRESENT_PCT else 0.0
+        for gene in positive
+    ]
     score = float(sum(parts) / len(parts)) if parts else 0.0
     score += float(sum(positive_contribution(gene) for gene in support or []))
     fired = [value for value in (negative_penalty(gene) for gene in negative) if value > 0]
     # One opposing gene weighs like one positive gene. Subtracting the whole
     # logfc let a single shared gene erase a specific panel.
     penalty = float(sum(fired) / len(parts)) if fired and parts else float(sum(fired))
+    # None means this name has no required gene. An empty list means the
+    # required genes were absent from the matrix, so the name cannot win.
+    eligible = (
+        True if required is None else any(gene.pct_in >= NEGATIVE_PRESENT_PCT for gene in required)
+    )
     return ScoredHypothesis(
         hypothesis=hypothesis,
         positive=tuple(positive),
         negative=tuple(negative),
         score=score - penalty,
         penalty=penalty,
+        eligible=eligible,
     )
 
 
@@ -82,33 +90,38 @@ def arbitrate(
     if len(scored) < 1:
         raise ValueError("no hypotheses to arbitrate")
     ranked = sorted(scored, key=lambda item: (-item.score, item.hypothesis.name))
-    top = ranked[0]
-    runner = ranked[1] if len(ranked) > 1 else None
-    margin = top.score if runner is None else top.score - runner.score
+    eligible = [item for item in ranked if item.eligible]
+    # A name that failed its required genes stays visible, after the names that can win.
+    ordered = [*eligible, *[item for item in ranked if not item.eligible]]
+    top = eligible[0] if eligible else None
+    runner = eligible[1] if len(eligible) > 1 else None
+    margin = 0.0 if top is None else top.score if runner is None else top.score - runner.score
     accepted: list[str] | None = None
-    if conformal_q is not None:
+    if conformal_q is not None and eligible:
         from .mltools import prediction_set
 
-        accepted = prediction_set(ranked, conformal_q)
+        accepted = prediction_set(eligible, conformal_q)
     status = "label"
-    if top.penalty > 0 or not any(positive_contribution(gene) > 0 for gene in top.positive):
+    blocked = top is None or top.penalty > 0
+    blocked = blocked or not any(positive_contribution(gene) > 0 for gene in top.positive)
+    if blocked:
         status = "uncertain"
     elif accepted is not None:
         status = "label" if accepted == [top.hypothesis.name] else "uncertain"
     elif runner is not None and margin < min_margin:
         status = "uncertain"
-    cell_type = top.hypothesis.name if status == "label" else None
-    reasoning = _reasoning(top, status)
+    cell_type = None if top is None or status != "label" else top.hypothesis.name
+    reasoning = _reasoning(top if top is not None else ranked[0], status)
     return {
         "cluster": str(cluster),
         "status": status,
         "cell_type": cell_type,
         "margin": margin,
-        "score": top.score,
+        "score": 0.0 if top is None else top.score,
         "runner_up": None if runner is None else runner.hypothesis.name,
         "reasoning": reasoning,
         "evidence": {
-            **top.as_evidence(),
+            **(ranked[0] if top is None else top).as_evidence(),
             "de_not_in_markers": list(de_not_in_markers or []),
         },
         "ranking": [
@@ -116,8 +129,9 @@ def arbitrate(
                 "name": item.hypothesis.name,
                 "score": item.score,
                 "program_on": program_detected(item.positive),
+                "eligible": item.eligible,
             }
-            for item in ranked
+            for item in ordered
         ],
         "prediction_set": accepted,
         "hypotheses_tested": [item.hypothesis.name for item in ranked],

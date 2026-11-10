@@ -83,6 +83,43 @@ def test_cli_can_select_solo_and_scvi_independently(tmp_path: Path, monkeypatch)
     assert out.is_file()
 
 
+def test_cli_refuses_to_overwrite_an_input(tmp_path: Path):
+    src = tmp_path / "cells.h5ad"
+    src.write_bytes(b"counts")
+    hypotheses = tmp_path / "hypotheses.json"
+    hypotheses.write_text("[]")
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "--input",
+                str(src),
+                "--output",
+                str(src),
+                "--hypotheses",
+                str(hypotheses),
+                "--cluster-key",
+                "leiden",
+            ]
+        )
+    assert src.read_bytes() == b"counts"
+    report = tmp_path / "report.json"
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "--input",
+                str(src),
+                "--output",
+                str(report),
+                "--output-h5ad",
+                str(report),
+                "--hypotheses",
+                str(hypotheses),
+                "--cluster-key",
+                "leiden",
+            ]
+        )
+
+
 def test_cli_prepare_prints_install_line_when_scvi_is_missing(tmp_path: Path, monkeypatch, capsys):
     from importlib import import_module
 

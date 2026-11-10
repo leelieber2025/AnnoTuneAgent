@@ -38,6 +38,16 @@ def test_reuses_a_loaded_server_without_starting(monkeypatch, tmp_path):
     monkeypatch.setattr(ll, "_health_ok", lambda url: url == "http://127.0.0.1:8080")
     monkeypatch.setattr(ll, "_models_ok", lambda url: False)
     monkeypatch.setattr(ll, "_alive", lambda pid: pid == 42)
+
+    def described(url):
+        return {
+            "url": url,
+            "gguf": str(base.resolve()),
+            "adapters": {name: str(Path(path).resolve()) for name, path in _ADAPTERS.items()},
+            "ctx": 8192,
+        }
+
+    monkeypatch.setattr(ll, "_described_server", described)
     monkeypatch.setattr(
         ll,
         "_loaded_servers",
@@ -66,6 +76,42 @@ def test_reuses_a_loaded_server_without_starting(monkeypatch, tmp_path):
     saved = json.loads(ll._STATE.read_text())
     assert saved["pid"] == 42
     assert saved["adapters"]["name"] == str(Path("name.gguf").resolve())
+
+
+def test_attached_server_is_checked_again(monkeypatch, tmp_path):
+    base = tmp_path / "base.gguf"
+    base.write_bytes(b"x")
+    monkeypatch.setattr(ll, "_health_ok", lambda url: url == "http://127.0.0.1:8080")
+    monkeypatch.setattr(ll, "_models_ok", lambda url: False)
+    monkeypatch.setattr(ll, "_alive", lambda pid: pid == 42)
+    loaded = {
+        "pid": 42,
+        "port": 8080,
+        "url": "http://127.0.0.1:8080",
+        "gguf": str(base.resolve()),
+        "adapters": {name: str(Path(path).resolve()) for name, path in _ADAPTERS.items()},
+        "ctx": 8192,
+    }
+    monkeypatch.setattr(ll, "_loaded_servers", lambda: [loaded])
+    calls = {"n": 0}
+
+    def described(url):
+        calls["n"] += 1
+        changed = dict(loaded)
+        changed["gguf"] = "/other.gguf"
+        return changed
+
+    monkeypatch.setattr(ll, "_described_server", described)
+    monkeypatch.setattr(
+        ll.subprocess,
+        "Popen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("started")),
+    )
+    ll.open_adapters(_ADAPTERS, gguf=str(base), tokenizer="/tok")
+    with pytest.raises(RuntimeError, match="different GGUF"):
+        ll.open_adapters(_ADAPTERS, gguf=str(base), tokenizer="/tok")
+    assert calls["n"] == 1
+    assert ll._SERVER["gguf"] == str(base.resolve())
 
 
 def test_refuses_to_reuse_a_different_model(monkeypatch, tmp_path):

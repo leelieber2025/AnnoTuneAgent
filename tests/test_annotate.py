@@ -66,7 +66,7 @@ def test_support_gene_adds_only_when_enriched():
     assert boosted.score == pytest.approx(2.4)
 
 
-def test_undetected_positive_does_not_dilute_the_mean():
+def test_undetected_positive_stays_in_the_mean():
     from annotuneagent.arbitrate import score_hypothesis
     from annotuneagent.evidence import GeneEvidence
 
@@ -89,7 +89,8 @@ def test_undetected_positive_does_not_dilute_the_mean():
         [gene("Sst", 9.0, 1.0), gene("Hhex", 2.0, 0.8), gene("Ghsr", 0.0, 0.03)],
         [],
     )
-    assert scored.score == pytest.approx(5.5)
+    # Ghsr is undetected, so it contributes 0. The mean is (9 + 2 + 0) / 3.
+    assert scored.score == pytest.approx(11 / 3)
 
 
 def test_one_detected_gene_does_not_stand_for_the_panel():
@@ -127,7 +128,7 @@ def test_one_detected_gene_does_not_stand_for_the_panel():
     assert scored.score == pytest.approx(0.9)
 
 
-def test_two_detected_genes_are_not_diluted():
+def test_absent_genes_stay_in_the_mean():
     from annotuneagent.arbitrate import score_hypothesis
     from annotuneagent.evidence import GeneEvidence
 
@@ -159,7 +160,36 @@ def test_two_detected_genes_are_not_diluted():
         ],
         [],
     )
-    assert scored.score == pytest.approx(4.0)
+    # Three undetected genes stay in the mean as 0: (4 + 4 + 0 + 0 + 0) / 5.
+    assert scored.score == pytest.approx(1.6)
+
+
+def test_absent_identity_gene_dilutes_shared_markers():
+    from annotuneagent.arbitrate import score_hypothesis
+    from annotuneagent.evidence import GeneEvidence
+
+    def gene(name: str, logfc: float, pct_in: float) -> GeneEvidence:
+        return GeneEvidence(
+            gene=name,
+            direction="positive",
+            pct_in=pct_in,
+            pct_out=0.1,
+            mean_in=1.0,
+            mean_out=0.1,
+            logfc=logfc,
+            pvalue=0.01,
+            expressed=pct_in >= 0.25,
+        )
+
+    # Mouse memory CD4 is Cd4, S100a4, Cd44. Monocytes express the last two.
+    # A high fold change on an undetected Cd4 still contributes 0.
+    hypothesis = Hypothesis("memory CD4 T cell", positive=("Cd4", "S100a4", "Cd44"))
+    scored = score_hypothesis(
+        hypothesis,
+        [gene("Cd4", 5.0, 0.0), gene("S100a4", 4.0, 0.9), gene("Cd44", 2.0, 0.8)],
+        [],
+    )
+    assert scored.score == pytest.approx(2.0)
 
 
 def test_one_negative_gene_weighs_like_one_positive():
@@ -198,6 +228,84 @@ def test_one_negative_gene_weighs_like_one_positive():
     # Mean of the five positives is 3. The opposing gene subtracts 2/5.
     assert scored.score == pytest.approx(2.6)
     assert scored.penalty == pytest.approx(0.4)
+
+
+def test_t_cell_descendant_without_a_receptor_loses_to_monocyte():
+    from annotuneagent.markers import hypotheses_from_names
+
+    genes = [
+        "Cd4",
+        "S100a4",
+        "Cd44",
+        "Cd8b1",
+        "Foxp3",
+        "Cd3d",
+        "Cd3e",
+        "Cd3g",
+        "Trac",
+        "Lyz2",
+        "Cd14",
+        "Csf1r",
+        "Ms4a1",
+        "Ly6g",
+    ]
+    x = np.zeros((40, len(genes)), dtype=float)
+    # Cluster 0: macrophage genes plus the shared memory-CD4 genes. No Cd3.
+    for gene in ("S100a4", "Cd44", "Lyz2", "Cd14", "Csf1r"):
+        x[:20, genes.index(gene)] = 5
+    # Cluster 1: memory CD4 with Cd3e.
+    for gene in ("Cd3e", "Cd4", "S100a4", "Cd44"):
+        x[20:, genes.index(gene)] = 5
+    adata = AnnData(X=x, obs={"leiden": ["0"] * 20 + ["1"] * 20})
+    adata.var_names = genes
+    adata.uns["log1p"] = {"base": None}
+    records = annotate(
+        adata,
+        "leiden",
+        hypotheses_from_names(["memory CD4 T cell", "monocyte"], "mouse"),
+    )
+    by_cluster = {record["cluster"]: record for record in records}
+    assert by_cluster["0"]["cell_type"] == "monocyte"
+    memory = next(row for row in by_cluster["0"]["ranking"] if row["name"] == "memory CD4 T cell")
+    assert memory["eligible"] is False
+    assert by_cluster["1"]["cell_type"] == "memory CD4 T cell"
+
+
+def test_mait_markers_penalize_memory_cd4():
+    from annotuneagent.markers import hypotheses_from_names
+
+    genes = [
+        "IL7R",
+        "S100A4",
+        "ANXA1",
+        "KLRB1",
+        "CD8B",
+        "FOXP3",
+        "SLC4A10",
+        "TRAV1-2",
+        "CD3D",
+        "CD3E",
+        "CD3G",
+        "TRAC",
+        "ZBTB16",
+        "RORC",
+        "CD4",
+        "TRDC",
+    ]
+    x = np.zeros((40, len(genes)), dtype=float)
+    for gene in ("CD3D", "CD3E", "IL7R", "KLRB1", "SLC4A10", "TRAV1-2", "ZBTB16", "RORC"):
+        x[:20, genes.index(gene)] = 5
+    x[20:, genes.index("ANXA1")] = 5
+    adata = AnnData(X=x, obs={"leiden": ["0"] * 20 + ["1"] * 20})
+    adata.var_names = genes
+    adata.uns["log1p"] = {"base": None}
+    records = annotate(
+        adata,
+        "leiden",
+        hypotheses_from_names(["memory CD4 T cell", "MAIT cell"], "human"),
+    )
+    by_cluster = {record["cluster"]: record for record in records}
+    assert by_cluster["0"]["cell_type"] == "MAIT cell"
 
 
 def test_one_detected_gene_is_not_a_program():

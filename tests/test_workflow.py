@@ -516,6 +516,136 @@ def test_label_without_a_passing_marker_is_written_and_flagged():
     assert report["queue"] == ["1"]
 
 
+def test_failed_marker_name_yields_to_models_that_agree():
+    from annotuneagent.workflow import _flag_labels_without_markers, _lineage_resources
+
+    dag, label_map, _known = _lineage_resources("mouse")
+    record = {
+        "cluster": "7",
+        "status": "label",
+        "cell_type": "memory CD4 T cell",
+        "written_label": "memory CD4 T cell",
+        "final_status": "named",
+        "final_reason": "evidence_conflict",
+        "hint": "conflict: name classical monocyte, ML monocyte",
+        "rounds": [
+            {"step": "name", "names": ["classical monocyte"]},
+            {"step": "ml", "names": ["monocyte"]},
+        ],
+    }
+    resolved = {"7": {"7": "memory CD4 T cell"}}
+    status = {"memory CD4 T cell": "no_marker_passed_expression_check"}
+    changed = _flag_labels_without_markers(
+        [record],
+        resolved,
+        status,
+        {},
+        species="mouse",
+        dag=dag,
+        label_map=label_map,
+    )
+    assert changed
+    assert record["written_label"] == "classical monocyte"
+    assert resolved["7"] == {"7": "classical monocyte"}
+    assert record["hint"] == "conflict: marker memory CD4 T cell"
+
+
+def test_failed_marker_call_does_not_replace_an_agreed_name():
+    from annotuneagent.workflow import _flag_labels_without_markers, _lineage_resources
+
+    dag, label_map, _known = _lineage_resources("mouse")
+    record = {
+        "cluster": "7",
+        "status": "label",
+        "cell_type": "memory CD4 T cell",
+        "written_label": "classical monocyte",
+        "final_status": "named",
+        "final_reason": "evidence_conflict",
+        "hint": "conflict: marker memory CD4 T cell",
+        "rounds": [
+            {"step": "name", "names": ["classical monocyte"]},
+            {"step": "ml", "names": ["monocyte"]},
+        ],
+    }
+    resolved = {"7": {"7": "classical monocyte"}}
+    status = {"classical monocyte": "no_marker_passed_expression_check"}
+    changed = _flag_labels_without_markers(
+        [record],
+        resolved,
+        status,
+        {},
+        species="mouse",
+        dag=dag,
+        label_map=label_map,
+        rejected={"classical monocyte", "memory CD4 T cell"},
+    )
+    assert changed is False
+    assert record["written_label"] == "classical monocyte"
+    assert record["final_reason"] == "no_marker_passed"
+    assert "no marker passed" in record["hint"]
+
+
+def test_ineligible_marker_score_does_not_win():
+    from annotuneagent.workflow import _marker_score
+
+    ranking = [
+        {"name": "monocyte", "score": 1.2, "eligible": True},
+        {"name": "memory CD4 T cell", "score": 4.0, "eligible": False},
+    ]
+    assert _marker_score("memory CD4 T cell", ranking) is None
+    assert _marker_score("monocyte", ranking) == 1.2
+    settled = settle_cluster(
+        marker="cDC2",
+        name="memory CD4 T cell",
+        ml=MlResult("named", ("monocyte",)),
+        added=[],
+        cells=139,
+        species="mouse",
+        ranking=ranking,
+        margin=0.4,
+        marker_labeled=False,
+    )
+    assert settled["written_label"] == "monocyte"
+    blocked = settle_cluster(
+        marker="memory CD4 T cell",
+        name=None,
+        ml=MlResult("failed"),
+        added=[],
+        cells=100,
+        ranking=[{"name": "memory CD4 T cell", "score": 4.0, "eligible": False}],
+        marker_labeled=False,
+    )
+    assert blocked["written_label"] is None
+
+
+def test_checked_marker_still_replaces_a_failed_name():
+    from annotuneagent.workflow import _flag_labels_without_markers
+
+    record = {
+        "cluster": "0",
+        "status": "label",
+        "cell_type": "B cell",
+        "written_label": "T cell",
+        "final_status": "named",
+        "final_reason": "evidence_conflict",
+        "hint": "conflict: marker B cell",
+        "rounds": [
+            {"step": "name", "names": ["T cell"]},
+            {"step": "ml", "names": ["NK cell"]},
+        ],
+    }
+    resolved = {"0": {"0": "T cell"}}
+    status = {
+        "T cell": "no_marker_passed_expression_check",
+        "B cell": "selected",
+    }
+    changed = _flag_labels_without_markers([record], resolved, status, {})
+    assert changed
+    assert record["written_label"] == "B cell"
+    assert record["final_reason"] == "marker_rule"
+    assert record["hint"] is None
+
+
 def _chain(name, ml):
     return ModelChain(
         name=TaskEndpoint(ask=name),

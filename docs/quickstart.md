@@ -28,6 +28,23 @@ adata = ata.read_10x("outs", ["sample_a", "sample_b"])
 adata = ata.prepare(adata, species="mouse", batch_key="sample")
 ```
 
+To start from a GEO series, `ata.geo_info` reads the series record and lists
+each sample title, accession, and characteristics. It does not download
+counts. Print that result, choose the samples, and pass the names you want
+to `ata.read_geo`. `obs["sample"]` stays the GEO title. `obs["group"]` is the
+name you pass. Use either column as `batch_key`.
+
+```python
+info = ata.geo_info("GSE341410")
+adata = ata.read_geo(info, samples=["B1", "B3"], groups="B1: control B3: Day7")
+adata = ata.prepare(adata, species="mouse", batch_key="sample")
+```
+
+{doc}`tutorials/gse266598_annotation` runs this path on
+[GSE266598](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE266598):
+read the series page, download the two calvarial samples, then `prepare` and
+`run`.
+
 ## Run the name and ML models
 
 The call above collects the marker score only. To also run the name and ML
@@ -236,7 +253,9 @@ result, and writes the title. Doubt is recorded in `annotune_hint` and in
 - `no_marker_passed`: none of the name's cited markers passed the expression
   check. The name stays, the hint reads `no marker passed`, and the dotplot
   shows the best-measured cited genes. If the marker call is a different name
-  that did pass, that name is written instead.
+  that did pass, that name is written instead. An unchecked marker call is
+  tried once. If it fails, and the name and ML models agree on another
+  lineage, that agreed name is written instead.
 - `mixed_programs`: a cluster under 40 cells shows two programs. It is named
   only when the marker score, name model, and ML model give the same name. The
   hint lists the programs. Otherwise the cluster stays unnamed.

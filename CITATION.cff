@@ -17,8 +17,8 @@ authors:
     orcid: "https://orcid.org/0000-0002-9276-9129"
 repository-code: "https://github.com/leelieber2025/AnnoTuneAgent"
 license: Apache-2.0
-version: 0.1.1
-date-released: "2026-11-09"
+version: 0.1.2
+date-released: "2026-11-10"
 keywords:
   - single-cell
   - RNA-seq

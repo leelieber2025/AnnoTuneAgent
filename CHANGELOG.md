@@ -2,7 +2,43 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.1.2] - 2026-11-10
+
+### Added
+
+- `geo_info` reads a GEO series record: sample titles, accessions, and
+  characteristics, without the count matrices. `read_geo` downloads the
+  samples you name and joins them. `groups` sets `obs["group"]`. The GEO
+  title stays in `obs["sample"]`.
+- A tutorial runs [GSE266598](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE266598)
+  from the series page through `prepare` and annotation.
+
+### Fixed
+
+- The CLI refuses to write the JSON report, the labeled h5ad, or the marker
+  PDF onto an input file, or to use one path for two of those outputs.
+- A T-cell subtype with no receptor gene detected in 25% of the cluster is
+  left out of `dictionary_hits`, is not a vote, and is not written when it is
+  the only name still in the judgment.
+- `read_geo` keeps an uncompressed 10x file uncompressed. Several h5 matrices
+  use the one filtered file; otherwise the call raises. A sample title that
+  contains spaces can be passed as one string.
+- Reusing a server this process did not start checks `/props` and
+  `/lora-adapters` again.
+
+- `prepare` drops a stored neighbors record that has no `n_neighbors` before
+  it builds the graph. Hao 2021 PBMC carries that record, and Scanpy raised
+  `KeyError` on it.
+- A marker score keeps every positive gene in the mean. A gene detected in
+  fewer than 25% of the cells contributes 0. Dropping that gene let monocyte
+  clusters match memory CD4 T cell on `S100a4` and `Cd44` alone.
+- A name whose cited markers fail the expression check is not kept when the
+  name and ML models agree on another lineage. A marker call that already
+  failed is not written again in its place.
+- A name under T cell cannot win the marker score unless `CD3D`, `CD3E`,
+  `CD3G`, or `TRAC` is detected in at least 25% of the cluster. Mouse symbols
+  are `Cd3d`, `Cd3e`, `Cd3g`, and `Trac`. The T cell row itself is unchanged.
+- Human memory CD4 T cell uses `SLC4A10` and `TRAV1-2` as negative markers.
 
 ## [0.1.1] - 2026-11-09
 

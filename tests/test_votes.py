@@ -54,6 +54,23 @@ def test_gene_vote_ignores_a_single_high_marker_when_another_was_measured():
     assert gene_vote(hypotheses, {"INS": 4.0}) == "beta"
 
 
+def test_receptor_gate_blocks_a_vote():
+    hypotheses = [
+        Hypothesis(
+            "memory CD4 T cell",
+            positive=("S100a4", "Cd44"),
+            requires_any=("Cd3e",),
+        )
+    ]
+    assert gene_vote(hypotheses, {"S100a4": 2.0, "Cd44": 1.5, "Cd3e": 0.0}) is None
+    assert gene_vote(hypotheses, {"S100a4": 2.0, "Cd44": 1.5, "Cd3e": 1.2}) == "memory CD4 T cell"
+    record = {
+        "status": "uncertain",
+        "ranking": [{"name": "memory CD4 T cell", "score": 4.0, "eligible": False}],
+    }
+    assert panel_vote(record) is None
+
+
 def test_panel_vote_skips_a_high_negative_marker():
     record = {
         "status": "uncertain",

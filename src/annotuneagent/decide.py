@@ -335,6 +335,10 @@ def ranked_payload(
                 continue
             chosen.append(gene)
             total += value
+        if item.requires_any and not any(
+            pct.get(gene, 0.0) >= NEGATIVE_PRESENT_PCT for gene in item.requires_any
+        ):
+            continue
         if chosen:
             scored.append((total, item.name, chosen, item))
     scored.sort(key=lambda row: (-row[0], row[1]))

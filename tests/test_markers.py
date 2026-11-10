@@ -64,6 +64,8 @@ def test_scoring_table_drops_conflicts():
     assert ("human", "epithelial cell") not in by
     memory = by[("human", "memory CD4 T cell")]
     assert "CCR7" not in memory.negative
+    assert "SLC4A10" in memory.negative
+    assert "TRAV1-2" in memory.negative
     ilc2 = by[("human", "ILC2")]
     assert "HPGDS" in ilc2.positive
     assert "IL1RL1" not in ilc2.positive
@@ -73,6 +75,17 @@ def test_scoring_table_drops_conflicts():
     assert ("human", "lung goblet cell") in by
     assert ("human", "intestine goblet cell") in by
     assert ("human", "goblet cell") not in by
+
+
+def test_t_cell_descendants_require_a_receptor_gene():
+    mouse_memory = hypotheses_from_names(["memory CD4 T cell"], "mouse")[0]
+    human_memory = hypotheses_from_names(["memory CD4 T cell"], "human")[0]
+    mouse_t = hypotheses_from_names(["T cell"], "mouse")[0]
+    mouse_nk = hypotheses_from_names(["NK cell"], "mouse")[0]
+    assert mouse_memory.requires_any == ("Cd3d", "Cd3e", "Cd3g", "Trac")
+    assert human_memory.requires_any == ("CD3D", "CD3E", "CD3G", "TRAC")
+    assert mouse_t.requires_any == ()
+    assert mouse_nk.requires_any == ()
 
 
 def test_species_does_not_cross():

@@ -8,6 +8,7 @@ between calls.
 | Page | Contents |
 |----------|----------|
 | {doc}`pbmc8k_annotation` | Public PBMC 8k: `prepare`, then the name and ML models |
+| {doc}`gse266598_annotation` | GEO series GSE266598: series record, download, `prepare`, annotation |
 | {doc}`load_model` | Download the weights, then use a local server or connect to a remote one |
 | {doc}`report` | What each part of the `run` report is for, including the text to paste |
 
@@ -32,6 +33,15 @@ jupyter lab docs/tutorials/
 `prepare`, then the name and ML models.
 +++
 Public PBMC 8k counts
+:::
+
+:::{grid-item-card} GEO series
+:link: gse266598_annotation
+:link-type: doc
+
+From the GSE266598 page to a written title.
++++
+Two mouse calvarial 10x samples
 :::
 
 :::{grid-item-card} Load a model
@@ -59,6 +69,7 @@ No extra install
 :hidden:
 
 pbmc8k_annotation
+gse266598_annotation
 load_model
 report
 ```

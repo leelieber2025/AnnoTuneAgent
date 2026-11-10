@@ -106,6 +106,11 @@ directory when there is no h5). Scrublet and SOLO run per sample on those
 filtered counts. `doublet_chip="10k"` (default) uses 0.8% multiplets per
 1,000 recovered cells, and `"20k"` uses 0.4%.
 
+`geo_info("GSE341410")` lists the samples in a GEO series. `read_geo` then
+downloads the ones you name, and `groups` sets the condition in `obs["group"]`.
+[docs/tutorials/gse266598_annotation.ipynb](docs/tutorials/gse266598_annotation.ipynb)
+follows one series from the GEO page through annotation.
+
 To score a caller-supplied list instead of the built-in dictionary:
 
 ```python
@@ -154,12 +159,12 @@ The tokenizer is installed with the package. See
 
 ## Status
 
-**0.1.1 (Alpha).** Import as `import annotuneagent as ata`.
+**0.1.2 (Alpha).** Import as `import annotuneagent as ata`.
 
 ## Citation
 
 For the software record, cite the [Zenodo DOI](https://doi.org/10.5281/zenodo.24092828).
-Pin the package version used in the analysis, for example `annotuneagent==0.1.1`.
+Pin the package version used in the analysis, for example `annotuneagent==0.1.2`.
 
 ## License
 

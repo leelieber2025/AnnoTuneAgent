@@ -9,6 +9,8 @@ Recommended usage::
 
     records = ata.annotate(adata, cluster_key="leiden", hypotheses=[...])
     adata = ata.read_10x(base_dir, ["sample_a", "sample_b"])
+    info = ata.geo_info("GSE341410")
+    adata = ata.read_geo(info, samples=["B1", "B3"], groups="B1: control B3: Day7")
     prepared = ata.prepare(adata, species="human", batch_key="sample")
     report = ata.run(
         prepared, "leiden", species="human",
@@ -40,6 +42,7 @@ from __future__ import annotations
 from ._version import __version__
 from .annotate import annotate
 from .evaluate import evaluate
+from .geo import GeoSample, GeoSeries, geo_info, read_geo
 from .hypotheses import Hypothesis
 from .local_lora import attach, local_server
 from .markers import hypotheses_from_names, marker_names, suggest_tissues, tissue_pages
@@ -49,6 +52,8 @@ from .read import read_10x
 from .workflow import ModelChain, TaskEndpoint, dictionary_hypotheses, local_models, run
 
 __all__ = [
+    "GeoSample",
+    "GeoSeries",
     "Hypothesis",
     "__version__",
     "annotate",
@@ -57,6 +62,7 @@ __all__ = [
     "dictionary_hypotheses",
     "evaluate",
     "fit_ranker",
+    "geo_info",
     "hypotheses_from_names",
     "ModelChain",
     "TaskEndpoint",
@@ -65,6 +71,7 @@ __all__ = [
     "marker_names",
     "prepare",
     "read_10x",
+    "read_geo",
     "run",
     "suggest_tissues",
     "tissue_pages",

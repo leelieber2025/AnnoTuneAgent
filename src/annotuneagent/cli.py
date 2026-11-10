@@ -70,6 +70,34 @@ def _models(args, parser) -> ModelChain | None:
     )
 
 
+def _same_file(left: Path, right: Path) -> bool:
+    try:
+        return left.expanduser().resolve() == right.expanduser().resolve()
+    except OSError:
+        return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))
+
+
+def _reject_same_path(parser: argparse.ArgumentParser, args) -> None:
+    """Refuse to replace an input, or to use one path for two outputs."""
+    outputs = [path for path in (args.output, args.output_h5ad) if path is not None]
+    if args.output is not None:
+        outputs.append(args.output.with_name(args.output.stem + ".markers.pdf"))
+    inputs = [
+        path
+        for path in (args.input, args.hypotheses, args.catalog, args.raw, args.solo_expected_rates)
+        if isinstance(path, Path)
+    ]
+    for dest in outputs:
+        for source in inputs:
+            if _same_file(dest, source):
+                parser.error(f"{dest} is the same file as {source}")
+    seen: list[Path] = []
+    for dest in outputs:
+        if any(_same_file(dest, earlier) for earlier in seen):
+            parser.error(f"{dest} is used for more than one output")
+        seen.append(dest)
+
+
 def _hypotheses_from_file(path: Path) -> list[Hypothesis]:
     payload = json.loads(path.read_text())
     if not isinstance(payload, list):
@@ -263,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
     if models is not None and args.output_h5ad is None:
         parser.error("model endpoints require --output-h5ad")
     # Fail now. Prepare and the models can run for a long time before anything is written.
+    _reject_same_path(parser, args)
     for path in (args.output, args.output_h5ad):
         if path is None:
             continue

@@ -11,7 +11,7 @@ import annotuneagent as ata
 print(ata.__version__)
 ```
 
-The version is set in `src/annotuneagent/_version.py` (currently **0.1.1**).
+The version is set in `src/annotuneagent/_version.py` (currently **0.1.2**).
 
 From a checkout:
 
@@ -54,4 +54,6 @@ the reviewed name map. The tokenizer files come from `Qwen/Qwen3.5-4B`
 ## Next
 
 {doc}`quickstart` for a first call, {doc}`tutorials/pbmc8k_annotation` for QC and
-annotation, {doc}`tutorials/load_model` for a local or remote model server.
+annotation, {doc}`tutorials/gse266598_annotation` for a GEO series from the
+series page through annotation, and {doc}`tutorials/load_model` for a local or
+remote model server.

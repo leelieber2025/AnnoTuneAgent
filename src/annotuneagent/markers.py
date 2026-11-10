@@ -173,9 +173,34 @@ def hypotheses_from_names(
             positive=by_name[name].positive,
             negative=by_name[name].negative,
             support=by_name[name].support,
+            requires_any=_tcr_requirement(species, name),
         )
         for name in names
     ]
+
+
+def _descends_from(species: str, name: str, ancestor: str) -> bool:
+    by_name = {entry.cell_type: entry for entry in _ENTRIES if entry.species == species}
+    current = by_name.get(name)
+    seen: set[str] = set()
+    while current is not None and current.cell_type not in seen:
+        if current.parent == ancestor:
+            return True
+        seen.add(current.cell_type)
+        if not current.parent:
+            return False
+        current = by_name.get(current.parent)
+    return False
+
+
+def _tcr_requirement(species: str, name: str) -> tuple[str, ...]:
+    """T-cell receptor genes for a name under T cell. The T cell row itself is open."""
+    if not _descends_from(species, name, "T cell"):
+        return ()
+    for entry in _ENTRIES:
+        if entry.species == species and entry.cell_type == "T cell":
+            return entry.positive
+    return ()
 
 
 def _explain_missing(name: str, species: str, tissue: str | None) -> str:

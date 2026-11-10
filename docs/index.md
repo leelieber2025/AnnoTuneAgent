@@ -58,6 +58,7 @@ scFair supplies the gene list and the resolution is half of its suggestion.
 |------|----------|
 | {doc}`installation`, {doc}`quickstart` | Install, then a first call |
 | {doc}`tutorials/pbmc8k_annotation` | PBMC 8k: `prepare`, then the name and ML models |
+| {doc}`tutorials/gse266598_annotation` | GEO GSE266598: download, then `prepare` and annotation |
 | {doc}`tutorials/load_model` | Download the weights and run a local or remote model server |
 | {doc}`tutorials/report` | What each part of the `run` report is for, including the text to paste |
 | {doc}`api/index` | Function signatures |

@@ -275,6 +275,7 @@ def prepare(
         else min(chosen_pcs, int(adata.obsm[use_rep].shape[1]))
     )
     with _timed("prepare  neighbors"):
+        _drop_stale_neighbors(adata)
         sc.pp.neighbors(
             adata,
             n_neighbors=neighbors,
@@ -388,6 +389,23 @@ def _qc_violin(adata: AnnData) -> None:
         return
     plt.tight_layout()
     plt.show()
+
+
+def _drop_stale_neighbors(adata: AnnData) -> None:
+    """Drop a neighbors record that Scanpy cannot reload.
+
+    ``sc.pp.neighbors`` reads ``uns['neighbors']`` before it builds the new
+    graph. A ``params`` entry without ``n_neighbors`` raises ``KeyError``.
+    CELLxGENE files store that record. The graph is computed again from the
+    representation just fit, so this record is not used.
+    """
+    neighbors = adata.uns.get("neighbors")
+    if neighbors is None:
+        return
+    params = neighbors.get("params") if isinstance(neighbors, dict) else None
+    if isinstance(params, dict) and "n_neighbors" in params:
+        return
+    del adata.uns["neighbors"]
 
 
 def annotation_resolution(

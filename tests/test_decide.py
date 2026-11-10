@@ -52,6 +52,24 @@ def test_undetected_gene_is_not_a_dictionary_hit():
     assert "Nkg7" not in payload["dictionary_hits"][0]["genes"]
 
 
+def test_t_subtype_without_a_receptor_is_not_a_hit():
+    from annotuneagent.decide import ranked_payload
+
+    payload = ranked_payload(
+        [("S100a4", 2.0), ("Cd44", 1.5), ("Lyz2", 3.0)],
+        {"S100a4": 0.8, "Cd44": 0.7, "Lyz2": 0.9, "Cd3e": 0.02},
+        [
+            Hypothesis(
+                "memory CD4 T cell",
+                positive=("S100a4", "Cd44"),
+                requires_any=("Cd3e", "Cd3d"),
+            ),
+            Hypothesis("monocyte", positive=("Lyz2",)),
+        ],
+    )
+    assert [item["name"] for item in payload["dictionary_hits"]] == ["monocyte"]
+
+
 def test_name_outside_the_hit_list_abstains():
     text = '{"action": "retest", "names": ["NK cell"]}'
     assert parse_decision(text, {"sensory neuron"}).action == "escalate"

@@ -203,7 +203,18 @@ def open_adapters(
     paths = {name: str(Path(adapters[name]).resolve()) for name in _TASKS}
     base = str(Path(gguf).resolve())
     if _server_live() and _SERVER.get("url") == target:
-        _require_matching_model(_SERVER, base, paths, ctx)
+        loaded = _SERVER
+        if not _SERVER.get("owned"):
+            loaded = _described_server(target)
+            if loaded is None:
+                raise RuntimeError(
+                    f"server at {target} is already running but its GGUF and adapters cannot be verified"
+                )
+        _require_matching_model(loaded, base, paths, ctx)
+        if not _SERVER.get("owned"):
+            _SERVER["gguf"] = str(loaded.get("gguf") or "")
+            _SERVER["adapters"] = dict(loaded.get("adapters") or {})
+            _SERVER["ctx"] = int(loaded.get("ctx") or 0)
         if _SERVER["tokenizer"] != tokenizer:
             raise RuntimeError("server already uses a different tokenizer")
         return

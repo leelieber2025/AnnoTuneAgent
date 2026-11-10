@@ -333,7 +333,9 @@ def _choose_label(
                 value,
             ),
         )
-    elif len(names) == 1:
+    elif len(names) == 1 and not any(
+        row.get("name") == names[0] and row.get("eligible") is False for row in ranking or []
+    ):
         chosen = names[0]
     else:
         return None, [], close
@@ -397,6 +399,10 @@ def _is_descendant(finer: str, coarser: str, species, dag, label_map) -> bool:
 def _marker_score(name: str, ranking: list[dict] | None) -> float | None:
     for row in ranking or []:
         if row.get("name") == name:
+            # A T-cell name with no receptor gene keeps its score for inspection
+            # and cannot win on it.
+            if row.get("eligible") is False:
+                return None
             return float(row["score"])
     return None
 
@@ -655,7 +661,15 @@ def _in_matrix(
         if negatives == item.negative and support == item.support:
             kept.append(item)
         else:
-            kept.append(Hypothesis(item.name, item.positive, negatives, support))
+            kept.append(
+                Hypothesis(
+                    item.name,
+                    item.positive,
+                    negatives,
+                    support,
+                    requires_any=item.requires_any,
+                )
+            )
     return kept, dropped
 
 
@@ -1026,7 +1040,24 @@ def run(
         marker_dict, marker_validation, marker_status = select_marker_panels(
             adata, label_key, species, tissue
         )
-        while _flag_labels_without_markers(records, resolved, marker_status, by_parent):
+        rejected_markers: set[str] = set()
+        while True:
+            rejected_markers.update(
+                name
+                for name, status in marker_status.items()
+                if status == "no_marker_passed_expression_check"
+            )
+            if not _flag_labels_without_markers(
+                records,
+                resolved,
+                marker_status,
+                by_parent,
+                species=species or None,
+                dag=dag,
+                label_map=label_map,
+                rejected=rejected_markers,
+            ):
+                break
             labels = _assign_labels(adata, cluster_key, resolved)
             written = bool(labels.notna().any())
             adata.obs[label_key] = labels.astype("category")
@@ -1463,15 +1494,21 @@ def _run_models(
                 if record.get("status") == "label":
                     resolved[cluster] = {cluster: str(record["cell_type"])}
         ranking = [dict(row) for row in record.get("ranking") or []]
-        top = str(ranking[0]["name"]) if ranking else None
+        open_rows = [row for row in ranking if row.get("eligible") is not False]
+        top = str(open_rows[0]["name"]) if open_rows else None
         labeled = bool(
             record.get("status") == "label"
             and record.get("cell_type")
             and top == str(record["cell_type"])
         )
         if top is None and record.get("status") == "label" and record.get("cell_type"):
-            top = str(record["cell_type"])
-            labeled = True
+            blocked = any(
+                str(row.get("name")) == str(record["cell_type"]) and row.get("eligible") is False
+                for row in ranking
+            )
+            if not blocked:
+                top = str(record["cell_type"])
+                labeled = True
         settled = settle_cluster(
             marker=top,
             name=name,
@@ -1556,19 +1593,31 @@ def _invoke(endpoint: TaskEndpoint, payload: dict, fetch, parse, system: str, ta
 
 
 def _flag_labels_without_markers(
-    records: list[dict], resolved: dict, marker_status: dict, by_parent: dict
+    records: list[dict],
+    resolved: dict,
+    marker_status: dict,
+    by_parent: dict,
+    *,
+    species: str | None = None,
+    dag=None,
+    label_map=None,
+    rejected: set[str] | None = None,
 ) -> bool:
     """Flag a written name when none of its cited markers passed.
 
     The name stays written and the record keeps a hint, so it is still queued
-    for review. The marker call replaces the name only when that call is a
-    different name that did pass. Returns True when a name was replaced.
+    for review. A marker call replaces it when that call passed, or once when
+    it has not been checked. Name and ML agreement on another lineage replaces
+    a failed name, including one the marker call just failed. A marker call
+    that already failed is not tried again. Returns True when a name was
+    replaced.
     """
     blocked = {
         name
         for name, status in marker_status.items()
         if status == "no_marker_passed_expression_check"
     }
+    failed = set(blocked if rejected is None else rejected)
     if not blocked:
         return False
     changed = False
@@ -1577,11 +1626,11 @@ def _flag_labels_without_markers(
         cluster = str(record["cluster"])
         mapping = resolved.get(cluster)
         if mapping and set(mapping) != {cluster}:
-            failed = {unit for unit, name in mapping.items() if name in blocked}
-            if not failed:
+            missed = {unit for unit, name in mapping.items() if name in blocked}
+            if not missed:
                 continue
             for child in by_parent.get(cluster, []):
-                if str(child["cluster"]) in failed:
+                if str(child["cluster"]) in missed:
                     child["final_reason"] = "no_marker_passed"
                     child["hint"] = "no marker passed"
             record["hint"] = "one or more subclusters have no marker that passed validation"
@@ -1589,13 +1638,26 @@ def _flag_labels_without_markers(
         if label not in blocked or mapping != {cluster: label}:
             continue
         marker = record.get("cell_type") if record.get("status") == "label" else None
-        if marker and marker != label and marker not in blocked:
+        marker_passed = bool(marker) and marker_status.get(marker) == "selected"
+        marker_untried = bool(marker) and marker not in marker_status and marker not in failed
+        if marker and marker != label and (marker_passed or marker_untried):
             changed = True
             record["written_label"] = marker
             record["final_status"] = "named"
             record["final_reason"] = "marker_rule"
             record["hint"] = None
             resolved[cluster] = {cluster: str(marker)}
+            continue
+        agreed = _agreed_model_name(record, species, dag, label_map)
+        if agreed and not _same_lineage(agreed, str(label), species, dag, label_map):
+            changed = True
+            record["written_label"] = agreed
+            record["final_status"] = "named"
+            record["final_reason"] = (
+                "evidence_conflict" if marker and marker != agreed else "evidence_agreement"
+            )
+            record["hint"] = f"conflict: marker {marker}" if marker and marker != agreed else None
+            resolved[cluster] = {cluster: agreed}
             continue
         if record.get("final_reason") == "no_marker_passed":
             continue
@@ -1604,6 +1666,19 @@ def _flag_labels_without_markers(
         hint = record.get("hint")
         record["hint"] = "no marker passed" if not hint else f"{hint}; no marker passed"
     return changed
+
+
+def _agreed_model_name(record: dict, species, dag, label_map) -> str | None:
+    """Finer name when the name and ML calls are one lineage. Otherwise none."""
+    name = _proposal_name(record, "name")
+    ml = _proposal_name(record, "ml")
+    if not name or not ml:
+        return None
+    if name != ml and not _same_lineage(name, ml, species, dag, label_map):
+        return None
+    if name != ml and _is_descendant(ml, name, species, dag, label_map):
+        return ml
+    return name
 
 
 def _parse_name(text: str, payload: dict):

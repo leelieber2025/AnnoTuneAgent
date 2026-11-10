@@ -14,6 +14,10 @@ The public API is the names below and `annotuneagent.__version__`.
    :nosignatures:
 
    read_10x
+   geo_info
+   read_geo
+   GeoSeries
+   GeoSample
    prepare
    run
    annotate

@@ -50,11 +50,17 @@ def annotate(
         wanted = {str(item) for item in clusters}
         ids = [item for item in ids if item in wanted]
     masks = [cluster_mask(adata, cluster_key, cluster) for cluster in ids]
+    present = set(map(str, adata.var_names))
     genes = list(
         dict.fromkeys(
             gene
             for hypothesis in hypotheses
-            for gene in (*hypothesis.positive, *hypothesis.negative, *hypothesis.support)
+            for gene in (
+                *hypothesis.positive,
+                *hypothesis.negative,
+                *hypothesis.support,
+                *(gene for gene in hypothesis.requires_any if gene in present),
+            )
         )
     )
     measured = marker_statistics(adata, masks, genes)
@@ -76,7 +82,14 @@ def annotate(
                 evidence_from_stats(gene, "positive", cluster_stats[gene])
                 for gene in hypothesis.support
             ]
-            scored.append(score_hypothesis(hypothesis, positive, negative, support))
+            required = None
+            if hypothesis.requires_any:
+                required = [
+                    evidence_from_stats(gene, "positive", cluster_stats[gene])
+                    for gene in hypothesis.requires_any
+                    if gene in cluster_stats
+                ]
+            scored.append(score_hypothesis(hypothesis, positive, negative, support, required))
         if ranker is not None:
             from .mltools import apply_ranker
 
