@@ -509,7 +509,12 @@ def _role(name: str) -> str | None:
     lower = name.lower()
     if lower.endswith("barcodes.tsv.gz") or lower.endswith("barcodes.tsv"):
         return "barcodes.tsv.gz"
-    if lower.endswith("features.tsv.gz") or lower.endswith("genes.tsv.gz"):
+    if (
+        lower.endswith("features.tsv.gz")
+        or lower.endswith("genes.tsv.gz")
+        or lower.endswith("features.tsv")
+        or lower.endswith("genes.tsv")
+    ):
         return "features.tsv.gz"
     if lower.endswith("matrix.mtx.gz") or lower.endswith("matrix.mtx"):
         return "matrix.mtx.gz"

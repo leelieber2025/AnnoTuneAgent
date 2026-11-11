@@ -187,12 +187,18 @@ def settle_cluster(
     lineages still write the higher-scoring ontology name and add a conflict
     hint. A marker margin below ``min_margin`` does the same, unless name and
     ML agree on a descendant of the marker call: that descendant is written
-    and the close-score hint stays. Platelet or megakaryocyte yields to a
-    monocyte program that is also on. A cluster under 40 cells with two
-    programs on is not named when marker, name, and ML do not all give the
-    same name. When they do, that name is written and the hint lists every
-    detected program from high score to low. A failed marker score with no
-    ontology name writes nothing. Agreement does not pick the name.
+    and the close-score hint stays. When one model says fibroblast and the
+    other says alveolar fibroblast, and that panel is on, the finer name is
+    written. A model that names a macrophage subtype keeps that subtype when
+    its panel is on. Platelet or megakaryocyte yields to a monocyte program that is
+    also on. A cluster under 40 cells with two programs on is not named when
+    marker, name, and ML do not all give the same name. When they do, that
+    name is written and the hint lists every detected program from high score
+    to low. NK and T programs that are both enriched against the other cells
+    do not receive one title. CD4 and CD8 names in the same call write T cell
+    instead of either child. Effector-memory CD8 does not win when a MAIT
+    marker is enriched. A failed marker score with no ontology name
+    writes nothing. Agreement does not pick the name.
     """
     ml_name = ml.names[0] if ml is not None and ml.status == "named" and ml.names else None
     proposals: list[dict[str, str]] = []
@@ -201,6 +207,16 @@ def settle_cluster(
     if ml_name:
         proposals.append({"source": "ml", "name": ml_name})
     spoken = {"marker": marker, "name": name, "ml": ml_name}
+    if cytotoxic_mixture(ranking):
+        return {
+            "proposals": proposals,
+            "added": list(added),
+            "written_label": None,
+            "hint": "NK and T programs are both enriched",
+            "arbitration": True,
+            "final_status": "review",
+            "final_reason": "cytotoxic_mixture",
+        }
     if species and dag is None:
         dag, label_map, loaded = _lineage_resources(species)
         if ontology_names is None:
@@ -216,6 +232,24 @@ def settle_cluster(
         dag=dag,
         label_map=label_map,
     )
+    notes_extra: list[str] = []
+    parent = _t_cell_if_both_arms(
+        label,
+        spoken,
+        ranking,
+        margin,
+        min_margin,
+        species,
+        dag,
+        label_map,
+    )
+    if parent and parent != label:
+        notes_extra.append("CD4 and CD8 are both supported")
+        label = parent
+    mait = _mait_instead_of_effector_cd8(label, ranking)
+    if mait and mait != label:
+        notes_extra.append("MAIT markers are enriched")
+        label = mait
     leukocyte = _monocyte_over_platelet(label, ranking, species, dag, label_map)
     if leukocyte:
         if label and label != leukocyte:
@@ -261,6 +295,9 @@ def settle_cluster(
             notes.append(_program_hint(ranking, species, dag, label_map))
             if reason == "evidence_agreement":
                 reason = "mixed_programs"
+        notes.extend(notes_extra)
+        if notes_extra and reason == "evidence_agreement":
+            reason = "evidence_conflict"
         if notes:
             hint = "; ".join(notes)
     return {
@@ -339,7 +376,140 @@ def _choose_label(
         chosen = names[0]
     else:
         return None, [], close
+    finer = _keep_alveolar_fibroblast(names, spoken, ranking, species, dag, label_map)
+    if finer:
+        chosen = finer
+    child = _keep_named_macrophage_child(names, spoken, ranking, species, dag, label_map)
+    if child:
+        chosen = child
     return chosen, _outside(components, chosen), close
+
+
+_CD4 = "CD4-positive, alpha-beta T cell"
+_CD8 = "CD8-positive, alpha-beta T cell"
+_EFFECTOR_CD8 = {"effector memory CD8 T cell", "CD8 TEMRA cell"}
+_MAIT_GENES = {"SLC4A10", "TRAV1-2", "Trav1"}
+
+
+def _t_arm(name: str, species, dag, label_map) -> str | None:
+    """Which of the two T-cell arms a name belongs to."""
+    if name == _CD4 or _is_descendant(name, _CD4, species, dag, label_map):
+        return "cd4"
+    if name == _CD8 or _is_descendant(name, _CD8, species, dag, label_map):
+        return "cd8"
+    return None
+
+
+def _t_cell_if_both_arms(
+    chosen,
+    spoken,
+    ranking,
+    margin,
+    min_margin,
+    species,
+    dag,
+    label_map,
+) -> str | None:
+    """Write T cell when the call touches both CD4 and CD8.
+
+    A close runner-up counts. A distant runner-up does not. The child is the
+    wrong call when the two arms disagree, and the parent stays in the lineage.
+    """
+    if not chosen or not species or dag is None or label_map is None:
+        return None
+    names = [str(chosen)]
+    for key in ("marker", "name", "ml"):
+        value = spoken.get(key)
+        if value:
+            names.append(str(value))
+    if margin is not None and margin < min_margin:
+        eligible = [
+            row for row in ranking or [] if row.get("eligible") is not False and row.get("name")
+        ]
+        names.extend(str(row["name"]) for row in eligible[:2])
+    arms = {_t_arm(name, species, dag, label_map) for name in names}
+    arms.discard(None)
+    if arms != {"cd4", "cd8"}:
+        return None
+    return "T cell"
+
+
+def _mait_instead_of_effector_cd8(chosen, ranking) -> str | None:
+    """Do not write effector-memory CD8 when a MAIT gene is enriched.
+
+    Eligible MAIT keeps its own name. A blocked MAIT row still removes the
+    effector-memory title and leaves T cell.
+    """
+    if chosen not in _EFFECTOR_CD8:
+        return None
+    for row in ranking or []:
+        if row.get("name") != "MAIT cell":
+            continue
+        genes = set(row.get("lead_genes") or [])
+        if not genes & _MAIT_GENES:
+            continue
+        if row.get("eligible") is False:
+            return "T cell"
+        return "MAIT cell"
+    return None
+
+
+def _keep_named_macrophage_child(names, spoken, ranking, species, dag, label_map) -> str | None:
+    """Keep one tissue macrophage when a model names it and its panel is on.
+
+    The generic macrophage panel is shared C1q and CD68. Kupffer, alveolar,
+    and interstitial panels are the names to write when a model already
+    chose one and that panel is detected. Two different subtypes are left
+    to the score.
+    """
+    parent = "macrophage"
+    if parent not in names:
+        return None
+    children: list[str] = []
+    for finer in (spoken.get("name"), spoken.get("ml")):
+        if not finer or finer == parent or finer in children:
+            continue
+        if not _is_descendant(finer, parent, species, dag, label_map):
+            continue
+        if not any(row.get("name") == finer and row.get("program_on") for row in ranking or []):
+            continue
+        children.append(finer)
+    if len(children) == 1:
+        return children[0]
+    return None
+
+
+def cytotoxic_mixture(ranking: list[dict] | None) -> bool:
+    """NK and T are each enriched against the other cells in this cluster.
+
+    Detection is not enough. Blood NK cells can carry CD3 because T cells
+    dominate the sample. A title is withheld so the cluster can be split.
+    """
+    flags = {
+        str(row.get("name")): bool(row.get("program_specific"))
+        for row in ranking or []
+        if row.get("name")
+    }
+    return bool(flags.get("NK cell") and flags.get("T cell"))
+
+
+def _keep_alveolar_fibroblast(names, spoken, ranking, species, dag, label_map) -> str | None:
+    """Use alveolar fibroblast when a model names it and its own panel is on.
+
+    The parent fibroblast score is often higher because collagen is widespread.
+    T-cell subtypes are left alone: CD4 and CD8 are not this kind of refinement.
+    """
+    finer = "alveolar fibroblast"
+    parent = "fibroblast"
+    if finer not in names or parent not in names:
+        return None
+    if finer not in {spoken.get("name"), spoken.get("ml")}:
+        return None
+    if not any(row.get("name") == finer and row.get("program_on") for row in ranking or []):
+        return None
+    if not _is_descendant(finer, parent, species, dag, label_map):
+        return None
+    return finer
 
 
 def _components(
@@ -641,31 +811,41 @@ def dictionary_hypotheses(
 def _in_matrix(
     hypotheses: list[Hypothesis], var_names: set[str]
 ) -> tuple[list[Hypothesis], list[dict[str, object]]]:
-    """Keep a type whose positive markers are all measured.
+    """Keep a type when at least one positive marker is measured.
 
-    A negative gene absent from the matrix is omitted. Absence is not evidence
-    for the type, and it does not drop the type. A missing positive marker
-    still drops the type. Each dropped row names those genes.
+    A support gene absent from the matrix is omitted. A negative gene absent
+    from the matrix stays on the hypothesis: the marker score ignores it, and
+    the ML panel counts it as unmeasured. A positive gene absent from the
+    matrix stays in the panel and scores 0. One missing positive gene does
+    not drop the type. A type whose positive markers are all absent is
+    dropped, and that row names those genes.
     """
     kept: list[Hypothesis] = []
     dropped: list[dict[str, object]] = []
     for item in hypotheses:
-        missing = [gene for gene in item.positive if gene not in var_names]
-        if missing:
+        positives = tuple(gene for gene in item.positive if gene in var_names)
+        if not positives:
             dropped.append(
-                {"name": item.name, "reason": "missing positive markers", "missing": missing}
+                {
+                    "name": item.name,
+                    "reason": "missing positive markers",
+                    "missing": list(item.positive),
+                }
             )
             continue
-        negatives = tuple(gene for gene in item.negative if gene in var_names)
+        # Absent positives stay on the hypothesis and score 0, so a short
+        # measured subset cannot use the mean of only the genes that exist.
+        # Absent negatives also stay. Dropping them made n_negative_unmeasured
+        # always 0, while the ML training rows count those genes.
         support = tuple(gene for gene in item.support if gene in var_names)
-        if negatives == item.negative and support == item.support:
+        if support == item.support:
             kept.append(item)
         else:
             kept.append(
                 Hypothesis(
                     item.name,
                     item.positive,
-                    negatives,
+                    item.negative,
                     support,
                     requires_any=item.requires_any,
                 )
@@ -874,7 +1054,9 @@ def run(
     of the cluster, differential expression and marker-panel statistics, and
     copies a name from those candidates. Name and ML each receive their own
     payload. Clear clusters are written to ``label_key``. Uncertain clusters
-    are subclustered once. Each step prints when it starts and how many seconds
+    are subclustered once. A cluster whose NK and T programs are both enriched
+    against the other cells is split even when the marker score named it.
+    Each step prints when it starts and how many seconds
     it took. A cluster with no written name, or a written name that still has a
     hint, prints a gene query that can be pasted into another model. A local
     server started for the adapters stays loaded after this call.
@@ -901,6 +1083,8 @@ def run(
             merged[item.name] = item
         hypotheses = list(merged.values())
     require_unique_var_names(adata)
+    if models is not None:
+        _require_model_imports(models)
     if SUBCLUSTER_KEY in adata.obs.columns:
         del adata.obs[SUBCLUSTER_KEY]
     kept, dropped = _in_matrix(hypotheses, set(map(str, adata.var_names)))
@@ -933,7 +1117,7 @@ def run(
         with _timed("run  subcluster") as note:
             split_any = False
             for record in records:
-                if record["status"] == "label":
+                if record["status"] == "label" and not cytotoxic_mixture(record.get("ranking")):
                     continue
                 mask = cluster_mask(adata, cluster_key, str(record["cluster"]))
                 if int(mask.sum()) < min_subcluster_cells:
@@ -1147,7 +1331,7 @@ def _model_name(record: dict, step: str):
         names = item.get("names") or []
         if names:
             return names[0]
-        return item.get("action")
+        return item.get("action") or item.get("status")
     return None
 
 
@@ -1346,6 +1530,21 @@ def _one_donor(adata, donor: str | None) -> str | None:
     return None
 
 
+def _require_model_imports(models: ModelChain) -> None:
+    """Model calls render the chat template locally. Check that before any scoring."""
+    if all(item.ask is not None for item in (models.name, models.ml)):
+        return
+    import importlib.util
+
+    missing = [
+        name for name in ("transformers", "jinja2") if importlib.util.find_spec(name) is None
+    ]
+    if missing:
+        raise ImportError(
+            f"model calls need {', '.join(missing)}; run: pip install 'annotuneagent[models]'"
+        )
+
+
 def _failure_text(exc: BaseException) -> str:
     if type(exc).__name__ == "OutOfMemoryError":
         return "OutOfMemoryError"
@@ -1414,7 +1613,11 @@ def _run_models(
     chosen = None if model_clusters is None else {str(item) for item in model_clusters}
     found: list[Hypothesis] = []
     dag, label_map, known_names = _lineage_resources(species or None)
-    tables = wilcoxon_order(adata, cluster_key)
+    try:
+        tables = wilcoxon_order(adata, cluster_key)
+    except ValueError:
+        # No cluster can be tested. Each model call then fails on its own record.
+        tables = {}
     for index, record in enumerate(records):
         cluster = str(record["cluster"])
         if chosen is not None and cluster not in chosen:
@@ -1527,6 +1730,18 @@ def _run_models(
         )
         if settled["written_label"]:
             resolved[cluster] = {cluster: str(settled["written_label"])}
+        elif settled["final_reason"] == "cytotoxic_mixture":
+            mapping = resolved.get(cluster) or {}
+            if mapping and set(mapping) != {cluster}:
+                settled = {
+                    **settled,
+                    "written_label": None,
+                    "arbitration": False,
+                    "final_status": "named",
+                    "final_reason": "subcluster_labels",
+                }
+            else:
+                resolved.pop(cluster, None)
         elif settled["final_reason"] == "mixed_programs":
             resolved.pop(cluster, None)
         else:
@@ -1584,6 +1799,7 @@ def _invoke(endpoint: TaskEndpoint, payload: dict, fetch, parse, system: str, ta
                 payload,
                 maxlen=limit,
                 tokenizer=endpoint.tokenizer,
+                system=endpoint.system or system,
             ), None
         raise ValueError("task needs a url, an adapter, or an ask function")
     except Exception as exc:
@@ -2079,10 +2295,19 @@ def _resolved_labels(adata, cluster_key, records, by_parent) -> dict[str, dict[s
     resolved: dict[str, dict[str, str]] = {}
     for record in records:
         cluster = str(record["cluster"])
+        children = list(by_parent.get(cluster, []))
+        if cytotoxic_mixture(record.get("ranking")):
+            child_map = {
+                str(row["cluster"]): str(row["cell_type"])
+                for row in children
+                if row.get("status") == "label" and row.get("cell_type")
+            }
+            if child_map:
+                resolved[cluster] = child_map
+            continue
         if record["status"] == "label":
             resolved[cluster] = {cluster: str(record["cell_type"])}
             continue
-        children = list(by_parent.get(cluster, []))
         if _children_labeled(children):
             resolved[cluster] = _child_label_map(children)
     return resolved

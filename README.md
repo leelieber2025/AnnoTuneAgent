@@ -72,7 +72,8 @@ Python 3.10–3.13.
 pip install annotuneagent
 ```
 
-Local GGUF models need `pip install 'annotuneagent[models]'`. Optional methods:
+Local GGUF models need `pip install 'annotuneagent[models]'`, which installs
+the tokenizer stack (`transformers` and `jinja2`). Optional methods:
 AmbiDose (`denoise=True`, [install](https://github.com/leelieber2025/AmbiDose)),
 scVI and SOLO (`annotuneagent[scvi]`), scFair (`annotuneagent[scfair]`),
 Harmony, and Scanorama. If you select one that is missing, `prepare` prints
@@ -159,12 +160,12 @@ The tokenizer is installed with the package. See
 
 ## Status
 
-**0.1.2 (Alpha).** Import as `import annotuneagent as ata`.
+**0.1.3 (Alpha).** Import as `import annotuneagent as ata`.
 
 ## Citation
 
 For the software record, cite the [Zenodo DOI](https://doi.org/10.5281/zenodo.24092828).
-Pin the package version used in the analysis, for example `annotuneagent==0.1.2`.
+Pin the package version used in the analysis, for example `annotuneagent==0.1.3`.
 
 ## License
 

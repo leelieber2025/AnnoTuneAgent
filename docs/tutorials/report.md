@@ -102,7 +102,7 @@ hint is in `review`, and on `annotune_hint`, and it is not in `queue`.
 | Field | What it is |
 |---|---|
 | `records` | The working record for each cluster, including model rounds and the marker ranking |
-| `dropped_hypotheses` | Dictionary types left out because a positive marker is missing from the matrix |
+| `dropped_hypotheses` | Dictionary types left out because none of their positive markers are in the matrix |
 | `subclusters` | The second split of a cluster that was not settled. Empty when `subcluster=False` |
 | `arbitration` | Clusters that were not given the status `named` |
 | `merged` | Titles that were given one `annotune_cluster` id |

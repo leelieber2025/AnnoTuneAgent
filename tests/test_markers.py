@@ -103,10 +103,10 @@ def test_dictionary_has_one_candidate_per_monocyte_subset():
     assert "CD16-positive monocyte" not in marker_names("mouse")
 
 
-def test_mouse_ilc_subtypes_remain_without_unsupported_pan_ilc():
-    names = marker_names("mouse")
-    assert "innate lymphoid cell" not in names
-    assert {"ILC2", "ILC3"} <= set(names)
+def test_mouse_pan_ilc_is_brain_scoped_and_subtypes_stay():
+    assert "innate lymphoid cell" not in marker_names("mouse")
+    assert "innate lymphoid cell" in marker_names("mouse", "brain")
+    assert {"ILC2", "ILC3"} <= set(marker_names("mouse"))
 
 
 def test_author_drg_offers_the_drg_page():
@@ -204,6 +204,15 @@ def test_unknown_author_tissue_returns_every_page():
         ("thymus", "epithelial cell of thymus"),
         ("intestine", "enteric neuron"),
         ("heart", "mesothelial cell of epicardium"),
+        ("brain", "choroid plexus epithelial cell"),
+        ("kidney", "kidney connecting tubule epithelial cell"),
+        ("retina", "retina horizontal cell"),
+        ("retina", "amacrine cell"),
+        ("muscle", "skeletal muscle myoblast"),
+        ("ovary", "stromal cell of ovary"),
+        ("skin", "Merkel cell"),
+        ("intestine", "transit amplifying cell of small intestine"),
+        ("limb", "Schwann cell"),
     ],
 )
 @pytest.mark.parametrize("species", ["human", "mouse"])

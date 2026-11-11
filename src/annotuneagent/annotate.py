@@ -11,6 +11,7 @@ from anndata import AnnData
 
 from .arbitrate import DEFAULT_MIN_MARGIN, arbitrate, score_hypothesis
 from .evidence import (
+    GeneEvidence,
     cluster_ids,
     cluster_mask,
     evidence_from_stats,
@@ -19,6 +20,10 @@ from .evidence import (
     validate_expression,
 )
 from .hypotheses import Hypothesis
+
+
+def _absent_gene(name: str) -> GeneEvidence:
+    return GeneEvidence(name, "positive", 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, False)
 
 
 def annotate(
@@ -36,9 +41,11 @@ def annotate(
     ``clusters`` limits the records to those cluster ids. Each cluster is still
     compared with every other cell, so its record is the same either way.
 
-    Expression is read from ``adata.X``. Genes named by a hypothesis must be in
-    ``var_names``. Declared markers are scored together across clusters, using
-    every CPU. Mann-Whitney p-values are reported and do not change the score.
+    Expression is read from ``adata.X``. A positive gene absent from
+    ``var_names`` scores 0 and stays in the panel mean. A negative gene
+    absent from ``var_names`` is not a penalty. Declared markers that are
+    present are scored together across clusters, using every CPU.
+    Mann-Whitney p-values are reported and do not change the score.
     """
     if adata.n_obs == 0:
         raise ValueError("AnnData has no cells")
@@ -59,8 +66,9 @@ def annotate(
                 *hypothesis.positive,
                 *hypothesis.negative,
                 *hypothesis.support,
-                *(gene for gene in hypothesis.requires_any if gene in present),
+                *hypothesis.requires_any,
             )
+            if gene in present
         )
     )
     measured = marker_statistics(adata, masks, genes)
@@ -72,11 +80,14 @@ def annotate(
         for hypothesis in hypotheses:
             positive = [
                 evidence_from_stats(gene, "positive", cluster_stats[gene])
+                if gene in cluster_stats
+                else _absent_gene(gene)
                 for gene in hypothesis.positive
             ]
             negative = [
                 evidence_from_stats(gene, "negative", cluster_stats[gene])
                 for gene in hypothesis.negative
+                if gene in cluster_stats
             ]
             support = [
                 evidence_from_stats(gene, "positive", cluster_stats[gene])

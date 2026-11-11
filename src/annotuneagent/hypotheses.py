@@ -18,10 +18,10 @@ class Hypothesis:
     0, so a missing identity gene dilutes genes that are shared with other
     types. ``support`` genes add their fold change when enriched and do not
     lower the score when absent. ``negative`` genes should not be detected. An
-    enriched negative gene lowers the score by its fold change, scaled by the
-    number of positive genes averaged. Absence of a negative gene is not
-    evidence for the label. ``requires_any`` lists genes of which at least one
-    must be detected in 25% of the cluster. Otherwise this name cannot win.
+    enriched negative gene is a reference: it lowers the score by half of its
+    fold change divided by the number of positive genes. Absence of a negative
+    gene is not evidence for the label. ``requires_any`` lists genes of which at
+    least one must be detected in 25% of the cluster. Otherwise this name cannot win.
     """
 
     name: str
@@ -31,6 +31,11 @@ class Hypothesis:
     requires_any: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        # A bare string is one gene. tuple("CD3E") would split it into letters.
+        for field in ("positive", "negative", "support", "requires_any"):
+            value = getattr(self, field)
+            if isinstance(value, str):
+                object.__setattr__(self, field, (value,) if value else ())
         if not self.name:
             raise ValueError("hypothesis name is empty")
         if not self.positive:

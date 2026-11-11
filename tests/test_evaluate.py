@@ -133,6 +133,40 @@ def test_missing_cluster_labels_are_an_error_not_a_cluster_called_nan():
         annotate(adata, "leiden", hypotheses_from_names(names, "human"))
 
 
+def test_unmapped_majority_is_not_replaced_by_a_mapped_minority():
+    from annotuneagent.evaluate import cluster_reference
+
+    raw = ["placental villous trophoblast"] * 80 + ["extravillous trophoblast"] * 20
+    mapped = [None] * 80 + ["extravillous trophoblast"] * 20
+    assert cluster_reference(raw, mapped) is None
+    pooled_raw = ["FC"] * 30 + ["RegC"] * 30 + ["fibroblast"] * 40
+    pooled_mapped = ["chondrocyte"] * 60 + ["fibroblast"] * 40
+    assert cluster_reference(pooled_raw, pooled_mapped) == "chondrocyte"
+    blank = [None] * 15 + ["CD4-positive, alpha-beta T cell"] * 5
+    assert cluster_reference(blank, blank) == "CD4-positive, alpha-beta T cell"
+
+
+def test_evaluate_does_not_score_a_mapped_minority():
+    adata = _labeled()
+    raw = ["placental villous trophoblast"] * 15 + ["CD4-positive, alpha-beta T cell"] * 5
+    raw += ["CD8-positive, alpha-beta T cell"] * 20
+    mapped = [None] * 15 + ["CD4-positive, alpha-beta T cell"] * 5
+    mapped += ["CD8-positive, alpha-beta T cell"] * 20
+    adata.obs["author_raw"] = raw
+    adata.obs["author"] = mapped
+    records = [
+        {"cluster": "0", "status": "label", "cell_type": "CD4-positive, alpha-beta T cell"},
+        {"cluster": "1", "status": "label", "cell_type": "CD8-positive, alpha-beta T cell"},
+    ]
+    summary = evaluate(records, adata, "leiden", "author", raw_label_key="author_raw")
+    by_cluster = {row["cluster"]: row for row in summary["clusters"]}
+    assert by_cluster["0"]["reference"] is None
+    assert by_cluster["0"]["exact"] is False
+    assert by_cluster["1"]["reference"] == "CD8-positive, alpha-beta T cell"
+    assert summary["n_exact"] == 1
+    assert summary["n_ambiguous_reference"] == 1
+
+
 def test_cells_without_an_author_label_take_no_part_in_the_majority():
     adata = _labeled()
     names = ["CD4-positive, alpha-beta T cell", "CD8-positive, alpha-beta T cell"]

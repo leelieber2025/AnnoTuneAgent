@@ -47,7 +47,7 @@ from .hypotheses import Hypothesis
 from .local_lora import attach, local_server
 from .markers import hypotheses_from_names, marker_names, suggest_tissues, tissue_pages
 from .mltools import conformal_quantile, fit_ranker
-from .prepare import prepare
+from .prepare import prepare, write_h5ad
 from .read import read_10x
 from .workflow import ModelChain, TaskEndpoint, dictionary_hypotheses, local_models, run
 
@@ -75,4 +75,5 @@ __all__ = [
     "run",
     "suggest_tissues",
     "tissue_pages",
+    "write_h5ad",
 ]

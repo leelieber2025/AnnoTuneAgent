@@ -13,6 +13,7 @@ from __future__ import annotations
 import getpass
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -38,6 +39,7 @@ _DEFAULT_SERVICE = "http://127.0.0.1:8080"
 # A long ML sample on a P1000 can take about two minutes. Health probes stay short.
 _DEFAULT_TIMEOUT = 600
 _SERVER: dict | None = None
+_ADAPTER_IDS: dict[str, dict[str, int]] = {}
 _LAST: dict = {}
 _TOKENIZERS: dict = {}
 
@@ -124,13 +126,60 @@ class SequenceTooLong(RuntimeError):
         self.maxlen = maxlen
 
 
-def scales_for(task: str) -> list[dict[str, float]]:
-    """Enable one adapter. The other stays at scale 0 for this request."""
+def scales_for(task: str, ids: dict[str, int] | None = None) -> list[dict[str, float]]:
+    """Enable one adapter. The other stays at scale 0 for this request.
+
+    ``ids`` maps ``name`` and ``ml`` to the server's adapter ids. The default
+    is the load order: name is 0 and ml is 1.
+    """
     if task not in _TASKS:
         raise ValueError(f"unknown task {task}")
-    return [
-        {"id": index, "scale": 1.0 if name == task else 0.0} for index, name in enumerate(_TASKS)
-    ]
+    chosen = ids or {name: index for index, name in enumerate(_TASKS)}
+    return sorted(
+        ({"id": int(chosen[name]), "scale": 1.0 if name == task else 0.0} for name in _TASKS),
+        key=lambda item: item["id"],
+    )
+
+
+def _auth_headers() -> dict[str, str]:
+    """``ANNOTUNE_API_KEY`` is sent as a bearer token, for llama-server ``--api-key``."""
+    key = os.environ.get("ANNOTUNE_API_KEY", "").strip()
+    return {"Authorization": f"Bearer {key}"} if key else {}
+
+
+def _adapter_ids(url: str) -> dict[str, int]:
+    """Adapter ids on a server this process did not start.
+
+    ``/lora-adapters`` lists each adapter's file. When exactly one file name
+    has the token ``name`` and exactly one has ``ml``, those ids are used, so
+    a server loaded with ``--lora ml.gguf,name.gguf`` is not called with the
+    adapters swapped. Otherwise the load order is assumed.
+    """
+    url = _base_url(url)
+    cached = _ADAPTER_IDS.get(url)
+    if cached is not None:
+        return cached
+    ids = {name: index for index, name in enumerate(_TASKS)}
+    listed = _get_json(url, "/lora-adapters")
+    if isinstance(listed, list):
+        found: dict[str, list[int]] = {}
+        for item in listed:
+            if not isinstance(item, dict) or "id" not in item:
+                continue
+            try:
+                index = int(item["id"])
+            except (TypeError, ValueError):
+                continue
+            filename = re.split(r"[\\/]", str(item.get("path") or ""))[-1].lower()
+            tokens = set(re.split(r"[^a-z0-9]+", filename))
+            for task in _TASKS:
+                if task in tokens:
+                    found.setdefault(task, []).append(index)
+        if all(len(found.get(task, [])) == 1 for task in _TASKS):
+            if found["name"][0] != found["ml"][0]:
+                ids = {task: found[task][0] for task in _TASKS}
+    _ADAPTER_IDS[url] = ids
+    return ids
 
 
 def last_call() -> dict:
@@ -309,7 +358,8 @@ def complete(task: str, system: str, payload: dict | str, *, maxlen: int) -> str
         evaluated = None
         predicted = None
     else:
-        scales = scales_for(task)
+        ids = None if runtime.get("owned") else _adapter_ids(runtime["url"])
+        scales = scales_for(task, ids)
         text, evaluated, predicted = _completion(runtime["url"], prompt, scales)
     global _LAST
     _LAST = {
@@ -337,11 +387,13 @@ def complete_url(
         raise ValueError(f"unknown task {task}")
     from .decide import user_text
 
+    # "http://host:8080/" would post to "//completion", which llama-server answers with 404.
+    url = _base_url(url)
     prompt = render_prompt(system, user_text(task, payload), tokenizer)
     tokens = prompt_tokens(prompt, tokenizer)
     if tokens + 32 > maxlen:
         raise SequenceTooLong(tokens, maxlen)
-    scales = scales_for(task)
+    scales = scales_for(task, _adapter_ids(url))
     text, evaluated, predicted = _completion(url, prompt, scales, timeout=timeout)
     global _LAST
     _LAST = {
@@ -374,6 +426,7 @@ def release() -> None:
     global _SERVER
     runtime = _SERVER
     _SERVER = None
+    _ADAPTER_IDS.clear()
     if runtime is None:
         return
     proc = runtime["proc"]
@@ -423,7 +476,8 @@ def _read_state() -> dict | None:
 
 def _health_ok(url: str) -> bool:
     try:
-        with urllib.request.urlopen(f"{url}/health", timeout=2) as resp:
+        request = urllib.request.Request(f"{url}/health", headers=_auth_headers())
+        with urllib.request.urlopen(request, timeout=2) as resp:
             payload = json.loads(resp.read().decode())
     except (OSError, urllib.error.URLError, json.JSONDecodeError, TimeoutError):
         return False
@@ -432,7 +486,8 @@ def _health_ok(url: str) -> bool:
 
 def _models_ok(url: str) -> bool:
     try:
-        with urllib.request.urlopen(f"{url}/v1/models", timeout=2) as resp:
+        request = urllib.request.Request(f"{url}/v1/models", headers=_auth_headers())
+        with urllib.request.urlopen(request, timeout=2) as resp:
             return 200 <= getattr(resp, "status", 200) < 300
     except (OSError, urllib.error.URLError, TimeoutError):
         return False
@@ -665,7 +720,8 @@ def _described_server(url: str) -> dict | None:
 
 def _get_json(url: str, path: str):
     try:
-        with urllib.request.urlopen(f"{url}{path}", timeout=2) as resp:
+        request = urllib.request.Request(f"{url}{path}", headers=_auth_headers())
+        with urllib.request.urlopen(request, timeout=2) as resp:
             body = json.loads(resp.read().decode())
     except (OSError, urllib.error.URLError, json.JSONDecodeError, TimeoutError):
         return None
@@ -691,10 +747,11 @@ def _loaded_servers() -> list[dict]:
         url = f"http://{host}:{port}"
         if not _health_ok(url):
             continue
-        lora = _arg(argv, "--lora") or ""
-        names = [part for part in lora.split(",") if part]
+        # Both "--lora a,b" and "--lora a --lora b" load two adapters in that order.
+        names = [part for value in _all_args(argv, "--lora") for part in value.split(",") if part]
         adapters = dict(zip(_TASKS, names, strict=True)) if len(names) == 2 else {}
         ctx_text = _arg(argv, "-c") or _arg(argv, "--ctx-size")
+        ctx_text = ctx_text.strip() if ctx_text else ctx_text
         found.append(
             {
                 "pid": int(entry.name),
@@ -717,12 +774,19 @@ def _cmdline(pid: int) -> list[str]:
 
 
 def _arg(argv: list[str], flag: str) -> str | None:
-    if flag not in argv:
-        return None
-    index = argv.index(flag)
-    if index + 1 >= len(argv):
-        return None
-    return argv[index + 1]
+    values = _all_args(argv, flag)
+    return values[0] if values else None
+
+
+def _all_args(argv: list[str], flag: str) -> list[str]:
+    """Every value of ``flag``, as ``--flag value`` or ``--flag=value``."""
+    values: list[str] = []
+    for index, item in enumerate(argv):
+        if item == flag and index + 1 < len(argv):
+            values.append(argv[index + 1])
+        elif item.startswith(flag + "="):
+            values.append(item[len(flag) + 1 :])
+    return values
 
 
 def _listen_port(pid: int) -> int | None:
@@ -883,7 +947,7 @@ def _post_url(url: str, path: str, payload: dict, timeout: float | None = None) 
     request = urllib.request.Request(
         f"{url}{path}",
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **_auth_headers()},
         method="POST",
     )
     try:

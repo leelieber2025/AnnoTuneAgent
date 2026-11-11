@@ -157,7 +157,9 @@ annotuneagent --input counts.h5ad --output report.json --output-h5ad prepared.h5
 
 When the CLI writes a prepared `.h5ad`, it stores `uns["annotune_prep"]` as a
 JSON string so AnnData can write the nested QC report. After reloading, use
-`json.loads(adata.uns["annotune_prep"])`.
+`json.loads(adata.uns["annotune_prep"])`. From Python, save with
+`ata.write_h5ad(adata, "prepared.h5ad")`; `adata.write_h5ad` raises on that
+report.
 
 ## Outputs
 
@@ -193,8 +195,9 @@ panel, not to each gene separately.
 
 ### Report fields
 
-- `dropped_hypotheses`: each dictionary type left out, and the positive markers
-  missing from the matrix.
+- `dropped_hypotheses`: each dictionary type left out because none of its
+  positive markers are in the matrix. One missing positive gene is omitted
+  and the type stays.
 - `review`: clusters that still need a look. The order is not an accuracy
   score.
 - `annotation_code`: an editable cluster mapping, `fine_order`, a `marker_dict`,

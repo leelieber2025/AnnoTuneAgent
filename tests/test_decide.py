@@ -35,6 +35,39 @@ def test_ml_user_keeps_negative_marker_measurements():
     assert rows["MS4A1"] == ["MS4A1", -1.0, 0.05, 0.4]
 
 
+def test_hit_order_ignores_the_file_name():
+    from annotuneagent.decide import ranked_payload
+
+    order = [("A", 4.0), ("B", 3.0), ("C", 2.0), ("D", 1.0)]
+    pct = {gene: 0.9 for gene in "ABCD"}
+    hypotheses = [Hypothesis(gene, positive=(gene,)) for gene in "ABCD"]
+    renamed = ranked_payload(order, pct, hypotheses, source="run1.h5ad", donor="d", cluster="0")
+    copied = ranked_payload(
+        order, pct, hypotheses, source="copy_of_run1.h5ad", donor="d", cluster="0"
+    )
+    api = ranked_payload(order, pct, hypotheses, donor="d", cluster="0")
+    names = [item["name"] for item in renamed["dictionary_hits"]]
+    assert names == [item["name"] for item in copied["dictionary_hits"]]
+    assert names == [item["name"] for item in api["dictionary_hits"]]
+    assert names != ["A", "B", "C", "D"]
+
+
+def test_unmeasured_negative_is_a_null_measurement():
+    genes = [{"gene": "CD3E", "logfc": 2.0, "pct_in": 0.9, "pct_out": 0.1}]
+    user = ml_user(
+        "human",
+        "blood",
+        "",
+        genes,
+        [("T cell", ["CD3E"], ["MS4A1", "TRDC"])],
+        {"CD3E": {"gene": "CD3E", "logfc": 2.0, "pct_in": 0.9, "pct_out": 0.1}},
+    )
+    assert user["candidates"][0][3][6] == 2
+    rows = {row[0]: row for row in user["marker_measurements"]}
+    assert rows["MS4A1"] == ["MS4A1", None, None, None]
+    assert rows["TRDC"] == ["TRDC", None, None, None]
+
+
 def test_undetected_gene_is_not_a_dictionary_hit():
     from annotuneagent.decide import ranked_payload
 

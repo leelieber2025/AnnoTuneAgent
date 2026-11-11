@@ -49,6 +49,7 @@ scvi = [
 ]
 models = [
     "transformers",
+    "jinja2>=3.1",
 ]
 scfair = [
     "scfair>=0.8",

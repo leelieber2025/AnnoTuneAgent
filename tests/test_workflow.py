@@ -1182,14 +1182,23 @@ def test_absent_negative_gene_keeps_the_type():
         Hypothesis("megakaryocyte", positive=("PF4", "VWF"), negative=("PTPRC",)),
     ]
     kept, dropped = _in_matrix(hypotheses, {"CD1C", "FCER1A", "CD14", "PF4", "PTPRC"})
-    assert dropped == [
+    assert dropped == []
+    assert [(item.name, item.positive, item.negative) for item in kept] == [
+        ("cDC2", ("CD1C", "FCER1A"), ("CLEC9A", "CD14")),
+        ("megakaryocyte", ("PF4", "VWF"), ("PTPRC",)),
+    ]
+    gone, dropped_all = _in_matrix(
+        [Hypothesis("megakaryocyte", positive=("PF4", "VWF"), negative=("PTPRC",))],
+        {"CD14"},
+    )
+    assert gone == []
+    assert dropped_all == [
         {
             "name": "megakaryocyte",
             "reason": "missing positive markers",
-            "missing": ["VWF"],
+            "missing": ["PF4", "VWF"],
         }
     ]
-    assert [(item.name, item.negative) for item in kept] == [("cDC2", ("CD14",))]
 
 
 def test_report_lists_missing_genes_and_review_order():
@@ -1217,6 +1226,257 @@ def test_report_lists_missing_genes_and_review_order():
     assert pending["status"] == "proposed"
     assert pending["pending"] is True
     assert _ontology_note(label_map, "not a cell", "human") == {"status": "unmapped"}
+
+
+def test_alveolar_fibroblast_is_kept_when_its_panel_is_on():
+    ranking = [
+        {"name": "fibroblast", "score": 0.90, "program_on": True},
+        {"name": "alveolar fibroblast", "score": 0.40, "program_on": True},
+    ]
+    settled = settle_cluster(
+        marker="fibroblast",
+        name="fibroblast",
+        ml=MlResult("named", ("alveolar fibroblast",)),
+        added=[],
+        cells=1493,
+        species="mouse",
+        ranking=ranking,
+        margin=0.10,
+        marker_labeled=False,
+    )
+    assert settled["written_label"] == "alveolar fibroblast"
+    silent = settle_cluster(
+        marker="fibroblast",
+        name="fibroblast",
+        ml=MlResult("named", ("alveolar fibroblast",)),
+        added=[],
+        cells=1493,
+        species="mouse",
+        ranking=[
+            {"name": "fibroblast", "score": 0.90, "program_on": True},
+            {"name": "alveolar fibroblast", "score": 0.40, "program_on": False},
+        ],
+        margin=0.10,
+        marker_labeled=False,
+    )
+    assert silent["written_label"] == "fibroblast"
+
+
+def test_a_named_macrophage_subtype_is_kept_when_its_panel_is_on():
+    ranking = [
+        {"name": "macrophage", "score": 0.90, "program_on": True},
+        {"name": "Kupffer cell", "score": 0.40, "program_on": True},
+    ]
+    settled = settle_cluster(
+        marker="macrophage",
+        name="Kupffer cell",
+        ml=MlResult("named", ("Kupffer cell",)),
+        added=[],
+        cells=2110,
+        species="human",
+        ranking=ranking,
+        margin=0.50,
+        marker_labeled=False,
+    )
+    assert settled["written_label"] == "Kupffer cell"
+    silent = settle_cluster(
+        marker="macrophage",
+        name="Kupffer cell",
+        ml=MlResult("named", ("Kupffer cell",)),
+        added=[],
+        cells=2110,
+        species="human",
+        ranking=[
+            {"name": "macrophage", "score": 0.90, "program_on": True},
+            {"name": "Kupffer cell", "score": 0.40, "program_on": False},
+        ],
+        margin=0.50,
+        marker_labeled=False,
+    )
+    assert silent["written_label"] == "macrophage"
+
+
+def test_t_cell_subtype_is_not_upgraded_like_alveolar_fibroblast():
+    settled = settle_cluster(
+        marker="T cell",
+        name="T cell",
+        ml=MlResult("named", ("CD8-positive, alpha-beta T cell",)),
+        added=[],
+        cells=190,
+        species="human",
+        ranking=[
+            {"name": "T cell", "score": 0.80, "program_on": True},
+            {"name": "CD8-positive, alpha-beta T cell", "score": 0.40, "program_on": True},
+        ],
+        margin=0.40,
+        marker_labeled=False,
+    )
+    assert settled["written_label"] == "T cell"
+
+
+def test_both_cd4_and_cd8_write_t_cell():
+    settled = settle_cluster(
+        marker="CD4-positive, alpha-beta T cell",
+        name="T cell",
+        ml=MlResult("named", ("CD8-positive, alpha-beta T cell",)),
+        added=[],
+        cells=548,
+        species="human",
+        ranking=[
+            {"name": "CD4-positive, alpha-beta T cell", "score": 0.70, "eligible": True},
+            {"name": "CD8-positive, alpha-beta T cell", "score": 0.20, "eligible": True},
+        ],
+        margin=0.50,
+        marker_labeled=False,
+    )
+    assert settled["written_label"] == "T cell"
+    assert "CD4 and CD8 are both supported" in settled["hint"]
+    close = settle_cluster(
+        marker="naive CD4 T cell",
+        name="naive T cell",
+        ml=MlResult("named", ("T cell",)),
+        added=[],
+        cells=603,
+        species="human",
+        ranking=[
+            {"name": "naive CD4 T cell", "score": 0.40, "eligible": True},
+            {"name": "naive CD8 T cell", "score": 0.32, "eligible": True},
+        ],
+        margin=0.08,
+        marker_labeled=False,
+    )
+    assert close["written_label"] == "T cell"
+    clear = settle_cluster(
+        marker="CD8-positive, alpha-beta T cell",
+        name="CD8-positive, alpha-beta T cell",
+        ml=MlResult("named", ("CD8-positive, alpha-beta T cell",)),
+        added=[],
+        cells=400,
+        species="human",
+        ranking=[
+            {"name": "CD8-positive, alpha-beta T cell", "score": 1.2, "eligible": True},
+            {"name": "CD4-positive, alpha-beta T cell", "score": 0.2, "eligible": True},
+        ],
+        margin=1.0,
+        marker_labeled=True,
+    )
+    assert clear["written_label"] == "CD8-positive, alpha-beta T cell"
+
+
+def test_mait_markers_block_effector_memory_cd8():
+    settled = settle_cluster(
+        marker=None,
+        name="effector memory CD8 T cell",
+        ml=MlResult("named", ("T cell",)),
+        added=[],
+        cells=437,
+        species="human",
+        ranking=[
+            {
+                "name": "effector memory CD8 T cell",
+                "score": 0.55,
+                "eligible": True,
+                "lead_genes": ["GZMK"],
+            },
+            {
+                "name": "MAIT cell",
+                "score": 0.40,
+                "eligible": True,
+                "lead_genes": ["SLC4A10"],
+            },
+        ],
+        margin=0.15,
+        marker_labeled=False,
+    )
+    assert settled["written_label"] == "MAIT cell"
+    blocked = settle_cluster(
+        marker=None,
+        name="effector memory CD8 T cell",
+        ml=MlResult("named", ("T cell",)),
+        added=[],
+        cells=437,
+        species="human",
+        ranking=[
+            {"name": "effector memory CD8 T cell", "score": 0.55, "eligible": True},
+            {
+                "name": "MAIT cell",
+                "score": 0.10,
+                "eligible": False,
+                "lead_genes": ["TRAV1-2"],
+            },
+        ],
+        margin=0.45,
+        marker_labeled=False,
+    )
+    assert blocked["written_label"] == "T cell"
+
+
+def test_nk_and_t_enriched_together_get_no_single_title():
+    ranking = [
+        {"name": "NK cell", "score": 1.2, "program_specific": True},
+        {"name": "T cell", "score": 0.9, "program_specific": True},
+        {"name": "CD8-positive, alpha-beta T cell", "score": 0.4, "program_specific": False},
+    ]
+    settled = settle_cluster(
+        marker="T cell",
+        name="T cell",
+        ml=MlResult("named", ("CD8-positive, alpha-beta T cell",)),
+        added=[],
+        cells=1195,
+        species="human",
+        ranking=ranking,
+        margin=0.3,
+        marker_labeled=True,
+    )
+    assert settled["written_label"] is None
+    assert settled["final_reason"] == "cytotoxic_mixture"
+    blood = settle_cluster(
+        marker="NK cell",
+        name="effector memory CD8 T cell",
+        ml=MlResult("named", ("NK cell",)),
+        added=[],
+        cells=1299,
+        species="human",
+        ranking=[
+            {"name": "NK cell", "score": 1.5, "program_specific": True},
+            {"name": "T cell", "score": 0.4, "program_specific": False},
+        ],
+        margin=1.1,
+        marker_labeled=False,
+    )
+    assert blood["written_label"] == "NK cell"
+
+
+def test_cytotoxic_mixture_is_split_even_when_the_marker_names_it():
+    nk = ("NKG7", "GNLY", "KLRD1", "KLRF1")
+    tcell = ("CD3D", "CD3E", "CD3G", "TRAC")
+    bcell = ("MS4A1", "CD79A", "CD79B", "CD19", "BANK1")
+    genes = [*nk, *tcell, *bcell]
+    x = np.zeros((120, len(genes)), dtype=float)
+    for gene in nk:
+        x[:80, genes.index(gene)] = 5
+    for gene in tcell:
+        x[:40, genes.index(gene)] = 5
+    for gene in bcell:
+        x[80:, genes.index(gene)] = 5
+    adata = AnnData(X=x, obs={"leiden": ["0"] * 80 + ["1"] * 40})
+    adata.var_names = genes
+    adata.uns["log1p"] = {"base": None}
+    report = run(
+        adata,
+        "leiden",
+        species="human",
+        hypotheses=hypotheses_from_names(["NK cell", "T cell", "B cell"], "human"),
+        min_subcluster_cells=40,
+    )
+    labels = adata.obs.loc[adata.obs["leiden"].astype(str) == "0", "annotune_label"]
+    assert not (labels.dropna().nunique() == 1 and not labels.isna().any())
+    parent = next(row for row in report["records"] if str(row["cluster"]) == "0")
+    assert parent.get("final_reason") in {
+        "subcluster_labels",
+        "cytotoxic_mixture",
+        "unresolved_evidence",
+    }
 
 
 def test_name_and_ml_are_called():

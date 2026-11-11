@@ -89,8 +89,8 @@ def test_undetected_positive_stays_in_the_mean():
         [gene("Sst", 9.0, 1.0), gene("Hhex", 2.0, 0.8), gene("Ghsr", 0.0, 0.03)],
         [],
     )
-    # Ghsr is undetected, so it contributes 0. The mean is (9 + 2 + 0) / 3.
-    assert scored.score == pytest.approx(11 / 3)
+    # Ghsr is undetected, so it contributes 0. The 9.0 fold change is capped at 3.
+    assert scored.score == pytest.approx(5 / 3)
 
 
 def test_one_detected_gene_does_not_stand_for_the_panel():
@@ -125,7 +125,8 @@ def test_one_detected_gene_does_not_stand_for_the_panel():
         ],
         [],
     )
-    assert scored.score == pytest.approx(0.9)
+    # GZMB 4.5 is capped at 3, and the other four genes contribute 0.
+    assert scored.score == pytest.approx(0.6)
 
 
 def test_absent_genes_stay_in_the_mean():
@@ -160,8 +161,8 @@ def test_absent_genes_stay_in_the_mean():
         ],
         [],
     )
-    # Three undetected genes stay in the mean as 0: (4 + 4 + 0 + 0 + 0) / 5.
-    assert scored.score == pytest.approx(1.6)
+    # Three undetected genes stay in the mean as 0. Each 4.0 is capped at 3.
+    assert scored.score == pytest.approx(1.2)
 
 
 def test_absent_identity_gene_dilutes_shared_markers():
@@ -189,10 +190,11 @@ def test_absent_identity_gene_dilutes_shared_markers():
         [gene("Cd4", 5.0, 0.0), gene("S100a4", 4.0, 0.9), gene("Cd44", 2.0, 0.8)],
         [],
     )
-    assert scored.score == pytest.approx(2.0)
+    # Cd4 is undetected. S100a4 is capped at 3. The mean is (0 + 3 + 2) / 3.
+    assert scored.score == pytest.approx(5 / 3)
 
 
-def test_one_negative_gene_weighs_like_one_positive():
+def test_one_negative_gene_is_half_a_positive():
     from annotuneagent.arbitrate import score_hypothesis
     from annotuneagent.evidence import GeneEvidence
 
@@ -225,9 +227,10 @@ def test_one_negative_gene_weighs_like_one_positive():
         ],
         [gene("Cd209a", 2.0, "negative")],
     )
-    # Mean of the five positives is 3. The opposing gene subtracts 2/5.
+    # The 4.0 fold change is capped at 3. Mean of 3, 3, 3, 3, 2 is 2.8.
+    # The opposing gene subtracts half of 2/5.
     assert scored.score == pytest.approx(2.6)
-    assert scored.penalty == pytest.approx(0.4)
+    assert scored.penalty == pytest.approx(0.2)
 
 
 def test_t_cell_descendant_without_a_receptor_loses_to_monocyte():
@@ -331,6 +334,30 @@ def test_one_detected_gene_is_not_a_program():
     assert program_detected([gene(1.0), gene(0.8), gene(0.1), gene(0.1)]) is True
 
 
+def test_program_specific_ignores_genes_that_are_common_outside():
+    from annotuneagent.arbitrate import program_specific
+    from annotuneagent.evidence import GeneEvidence
+
+    def gene(pct_in: float, pct_out: float, logfc: float) -> GeneEvidence:
+        return GeneEvidence(
+            gene="G",
+            direction="positive",
+            pct_in=pct_in,
+            pct_out=pct_out,
+            mean_in=1.0,
+            mean_out=0.1,
+            logfc=logfc,
+            pvalue=0.01,
+            expressed=True,
+        )
+
+    enriched = [gene(0.68, 0.08, 6.0), gene(0.54, 0.04, 7.1)]
+    ambient = [gene(0.75, 0.53, 1.36), gene(0.83, 0.53, 1.42)]
+    assert program_specific(enriched) is True
+    assert program_specific(ambient) is False
+    assert program_specific([gene(0.9, 0.02, 6.0), gene(0.2, 0.02, 6.0)]) is False
+
+
 def test_negative_marker_blocks_label():
     adata = _adata()
     adata.X[20:, 2] = 0
@@ -362,17 +389,27 @@ def test_ambient_negative_does_not_block():
     assert cluster0["cell_type"] == "CD4 T"
 
 
-def test_missing_gene_raises():
-    try:
-        annotate(
-            _adata(),
-            "leiden",
-            [Hypothesis("NK", positive=("NCAM1",), negative=())],
-        )
-    except KeyError as exc:
-        assert "NCAM1" in str(exc)
-    else:
-        raise AssertionError("expected KeyError")
+def test_absent_negative_does_not_change_the_label():
+    base = annotate(_adata(), "leiden", _hypotheses())
+    with_absent = [
+        Hypothesis("CD4 T", positive=("CD3E", "CD4"), negative=("CD8A", "NOT_IN_MATRIX")),
+        Hypothesis("CD8 T", positive=("CD3E", "CD8A"), negative=("CD4",)),
+    ]
+    extra = annotate(_adata(), "leiden", with_absent)
+    assert [(row["cluster"], row["cell_type"], row["status"]) for row in extra] == [
+        (row["cluster"], row["cell_type"], row["status"]) for row in base
+    ]
+    evidence = next(row for row in extra if row["cluster"] == "0")["evidence"]["negative"]
+    assert [gene["gene"] for gene in evidence] == ["CD8A"]
+
+
+def test_gene_absent_from_the_matrix_scores_zero():
+    records = annotate(
+        _adata(),
+        "leiden",
+        [Hypothesis("NK", positive=("NCAM1",), negative=())],
+    )
+    assert all(row["status"] == "uncertain" and row["cell_type"] is None for row in records)
 
 
 def test_single_candidate_without_positive_evidence_is_uncertain():

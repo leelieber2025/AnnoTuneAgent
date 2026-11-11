@@ -11,14 +11,13 @@ import os
 import sys
 from pathlib import Path
 
-import anndata as ad
 import scanpy as sc
 
 from .evaluate import evaluate
 from .hypotheses import Hypothesis
 from .local_lora import packaged_tokenizer
 from .markers import hypotheses_from_names, parents_for, suggest_tissues, tissue_pages
-from .prepare import install_hint, prepare
+from .prepare import install_hint, prepare, write_h5ad
 from .workflow import ModelChain, TaskEndpoint, dictionary_hypotheses, run
 
 
@@ -98,17 +97,31 @@ def _reject_same_path(parser: argparse.ArgumentParser, args) -> None:
         seen.append(dest)
 
 
+def _gene_field(item: dict, key: str, index: int) -> tuple[str, ...]:
+    value = item.get(key) or []
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list) or not all(isinstance(gene, str) for gene in value):
+        raise ValueError(f"hypothesis {index}: {key!r} must be a list of gene symbols")
+    return tuple(value)
+
+
 def _hypotheses_from_file(path: Path) -> list[Hypothesis]:
-    payload = json.loads(path.read_text())
+    # utf-8-sig: UTF-8 with or without the byte-order mark Windows editors add.
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(payload, list):
         raise ValueError("hypotheses file must be a JSON list")
     hypotheses: list[Hypothesis] = []
-    for item in payload:
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict) or not item.get("name"):
+            raise ValueError(f"hypothesis {index}: needs a name")
         hypotheses.append(
             Hypothesis(
                 str(item["name"]),
-                positive=tuple(item["positive"]),
-                negative=tuple(item.get("negative", ())),
+                positive=_gene_field(item, "positive", index),
+                negative=_gene_field(item, "negative", index),
+                support=_gene_field(item, "support", index),
+                requires_any=_gene_field(item, "requires_any", index),
             )
         )
     return hypotheses
@@ -333,7 +346,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         rates = None
         if args.solo_expected_rates is not None:
-            rates = json.loads(args.solo_expected_rates.read_text())
+            rates = json.loads(args.solo_expected_rates.read_text(encoding="utf-8-sig"))
             if not isinstance(rates, dict):
                 parser.error("--solo-expected-rates must contain a JSON object")
         adata = prepare(
@@ -385,11 +398,7 @@ def main(argv: list[str] | None = None) -> int:
             prediction_key="annotune_label",
         )
     # The report goes first so a failed h5ad write does not lose the run.
-    args.output.write_text(json.dumps(payload, indent=2) + "\n")
+    args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     if args.output_h5ad is not None:
-        saved = adata.copy()
-        if "annotune_prep" in saved.uns:
-            saved.uns["annotune_prep"] = json.dumps(saved.uns["annotune_prep"])
-        with ad.settings.override(allow_write_nullable_strings=True):
-            saved.write_h5ad(args.output_h5ad)
+        write_h5ad(adata, args.output_h5ad)
     return 0

@@ -1220,6 +1220,21 @@ def _qc_threshold_lines(prep: dict) -> list[str]:
     return lines
 
 
+def write_h5ad(adata: AnnData, path) -> None:
+    """Write ``adata`` to ``path``, including the ``prepare`` QC report.
+
+    ``uns["annotune_prep"]`` holds lists of per-sample dictionaries, which
+    ``AnnData.write_h5ad`` cannot store. The copy that is written keeps that
+    report as a JSON string; read it back with ``json.loads``. ``adata``
+    itself is not changed.
+    """
+    saved = adata.copy()
+    if isinstance(saved.uns.get("annotune_prep"), dict):
+        saved.uns["annotune_prep"] = json.dumps(saved.uns["annotune_prep"])
+    with ad.settings.override(allow_write_nullable_strings=True):
+        saved.write_h5ad(path)
+
+
 def doublet_summary(prep: dict | str | None) -> dict:
     """Doublet removal recorded by ``prepare``. Missing prep means it was not run."""
     if isinstance(prep, str):

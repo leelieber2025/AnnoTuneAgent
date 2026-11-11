@@ -2,6 +2,57 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.1.3] - 2026-11-11
+
+### Added
+
+- Dictionary rows for macrophage, mature NK T cell, choroid plexus epithelium,
+  kidney connecting tubule epithelium, retinal horizontal and amacrine cells,
+  skeletal muscle myoblast, ovarian stroma, Merkel cell, small-intestine
+  transit amplifying cell, limb Schwann cell, and brain innate lymphoid cell.
+- `evaluate(..., raw_label_key=...)`. A mapped name is the reference only when
+  it is the majority of every author-labeled cell. An unmapped raw majority
+  stays unmapped.
+- `write_h5ad` saves a prepared AnnData with its QC report.
+- `ANNOTUNE_API_KEY` is sent as a bearer token.
+
+### Changed
+
+- A marker score caps each gene's log2 fold change at 3. A fired negative marker
+  subtracts half of one positive gene's share and still blocks a hard marker
+  label.
+- When a call touches both CD4 and CD8, the written title is T cell. A cluster
+  whose NK and T panels are both specific is a cytotoxic mixture. A tissue
+  macrophage or alveolar fibroblast named by a model is kept when its own
+  panel is on. Effector-memory CD8 is not written when a MAIT marker is
+  enriched.
+
+### Fixed
+
+- `dictionary_hits` order no longer depends on the input file name. The
+  command line and the Python API use the same fixed seed.
+- A negative marker that is absent from the matrix stays on the ML panel.
+  `n_negative_unmeasured` counts it, and the marker score does not.
+- `annotuneagent[models]` installs `jinja2`, which the chat template needs.
+  `run` with model endpoints checks `transformers` and `jinja2` before
+  scoring instead of failing at the first cluster.
+- Model runs no longer stop on a one-cell cluster, an integer cluster
+  column, or unused categories. Wilcoxon skips clusters with fewer than two
+  cells; their model calls are recorded as failed.
+- A label needs a positive gene that is enriched and detected in 25% of the
+  cluster, the same rule as the score.
+- A model URL with a trailing slash no longer posts to `//completion` (404).
+- A server not started by this process is called with the adapter ids its
+  `/lora-adapters` file names give, so `--lora ml.gguf,name.gguf` is not
+  swapped. A server started with repeated `--lora` flags is recognized.
+- `TaskEndpoint(system=...)` is used on the URL path.
+- The report shows `escalate` for an ML escalation instead of `null`.
+- `--hypotheses` reads UTF-8 with or without a BOM, accepts `support` and
+  `requires_any`, and rejects non-list gene fields. `Hypothesis("x",
+  positive="CD3E")` is one gene, not four letters.
+- `read_geo` keeps an uncompressed `features.tsv` or `genes.tsv`.
+- `evaluate` treats a cluster with no record as uncertain.
+
 ## [0.1.2] - 2026-11-10
 
 ### Added

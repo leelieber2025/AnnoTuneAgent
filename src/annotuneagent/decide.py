@@ -67,6 +67,10 @@ _ACTIONS = frozenset({"adopt_subcluster", "retest", "refuse", "escalate"})
 # A marker counts as support only above this log2 fold change.
 SUPPORT_LOGFC = 0.5
 
+# dictionary_hits is shuffled so position is not rank. The seed does not
+# include the input path: a renamed file and the Python API share one order.
+_HIT_ORDER_SEED = "annotune-dictionary-hits"
+
 
 @dataclass(frozen=True)
 class Decision:
@@ -255,18 +259,33 @@ def wilcoxon_order(adata, cluster_key: str) -> dict[str, list[tuple[str, float]]
 
     import pandas as pd
 
-    # Scanpy inserts one column per cluster into a single frame.
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
-        sc.tl.rank_genes_groups(
-            adata,
-            groupby=cluster_key,
-            reference="rest",
-            method="wilcoxon",
-            use_raw=False,
-            pts=True,
-        )
+    # Scanpy needs a categorical column and at least two cells in every tested
+    # group. Integer cluster ids, unused categories, and one-cell clusters made
+    # it raise. A one-cell cluster has no table; it is still part of "rest".
+    tested = [str(cluster) for cluster, size in counts.items() if int(size) >= 2]
+    if not tested:
+        raise ValueError("wilcoxon needs a cluster with at least two cells")
+    groupby = "_annotune_wilcoxon_groups"
+    while groupby in adata.obs.columns:
+        groupby += "_"
+    adata.obs[groupby] = pd.Categorical(labels.to_numpy(), categories=list(counts.index))
+    try:
+        # Scanpy inserts one column per cluster into a single frame.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
+            sc.tl.rank_genes_groups(
+                adata,
+                groupby=groupby,
+                groups=tested,
+                reference="rest",
+                method="wilcoxon",
+                use_raw=False,
+                pts=True,
+            )
+    finally:
+        del adata.obs[groupby]
     result = adata.uns["rank_genes_groups"]
+    result["params"]["groupby"] = cluster_key
     tables: dict[str, list[tuple[str, float]]] = {}
     for cluster in counts.index:
         key = str(cluster)
@@ -357,8 +376,12 @@ def ranked_payload(
                 continue
             genes.append({"gene": gene, "logfc": round(by_gene[gene], 1)})
             have.add(gene)
-    if source is not None and cluster is not None:
-        random.Random(f"{source}|{donor}|{cluster}").shuffle(hits)
+    # ``source`` is accepted so older callers keep working. It is not part of
+    # the seed: training shuffled with the dataset file name, and a copy of
+    # that file would otherwise change the prompt.
+    del source
+    if cluster is not None:
+        random.Random(f"{_HIT_ORDER_SEED}|{donor}|{cluster}").shuffle(hits)
     payload: dict[str, object] = {
         "species": species,
         "tissue": tissue,
@@ -614,10 +637,12 @@ def post_chat(
             {"role": "user", "content": user_text(task, payload)},
         ],
     }
+    from .local_lora import _auth_headers
+
     request = urllib.request.Request(
         endpoint,
         data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **_auth_headers()},
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -639,6 +664,7 @@ def fetch_name(
     *,
     maxlen: int = 2048,
     tokenizer: str | None = None,
+    system: str | None = None,
 ) -> Decision:
     """Name task on ``/completion``. One adapter is enabled for this request."""
     from .local_lora import complete_url
@@ -646,7 +672,7 @@ def fetch_name(
     text = complete_url(
         url,
         "name",
-        SYSTEM_NAME,
+        system or SYSTEM_NAME,
         payload,
         maxlen=maxlen,
         timeout=timeout,
@@ -672,6 +698,7 @@ def fetch_ml(
     *,
     maxlen: int = 8192,
     tokenizer: str | None = None,
+    system: str | None = None,
 ) -> MlResult:
     """ML task on ``/completion``. One adapter is enabled for this request."""
     from .local_lora import complete_url
@@ -679,7 +706,7 @@ def fetch_ml(
     text = complete_url(
         url,
         "ml",
-        SYSTEM_ML,
+        system or SYSTEM_ML,
         payload,
         maxlen=maxlen,
         timeout=timeout,
