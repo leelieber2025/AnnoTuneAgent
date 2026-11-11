@@ -18,6 +18,7 @@ import scanpy as sc
 from anndata import AnnData
 from scipy import sparse
 
+from . import decide as _decide
 from .annotate import annotate
 from .arbitrate import DEFAULT_MIN_MARGIN
 from .decide import (
@@ -41,6 +42,7 @@ from .decide import (
 )
 from .evidence import NEGATIVE_PRESENT_PCT, cluster_mask, require_unique_var_names
 from .hypotheses import Hypothesis
+from .local_lora import complete as _ORIGINAL_COMPLETE
 from .marker_plot import (
     MAX_MARKERS_PER_TYPE,
     MAX_PVALUE,
@@ -1530,9 +1532,32 @@ def _one_donor(adata, donor: str | None) -> str | None:
     return None
 
 
+def _renders_with_tokenizer(models: ModelChain) -> bool:
+    """True when this run will render a prompt with the packaged tokenizer.
+
+    ``ask`` answers in process. A replaced ``fetch_*`` or ``complete`` is a
+    stub and does not render, so it does not need the tokenizer stack.
+    """
+    from . import local_lora
+
+    pairs = (
+        (models.name, fetch_name, _decide.fetch_name),
+        (models.ml, fetch_ml, _decide.fetch_ml),
+    )
+    for endpoint, current, original in pairs:
+        if endpoint.ask is not None:
+            continue
+        if endpoint.adapter:
+            if local_lora.complete is _ORIGINAL_COMPLETE:
+                return True
+        elif endpoint.url and current is original:
+            return True
+    return False
+
+
 def _require_model_imports(models: ModelChain) -> None:
     """Model calls render the chat template locally. Check that before any scoring."""
-    if all(item.ask is not None for item in (models.name, models.ml)):
+    if not _renders_with_tokenizer(models):
         return
     import importlib.util
 

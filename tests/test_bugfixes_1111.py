@@ -279,6 +279,28 @@ def test_integer_cluster_column_without_models():
     assert labels["0"] == "TA" and labels["1"] == "TB"
 
 
+def test_stubbed_model_calls_skip_the_tokenizer_check(monkeypatch):
+    import importlib.util
+
+    from annotuneagent import workflow
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util, "find_spec", lambda name, *a: None if name == "jinja2" else real(name, *a)
+    )
+    monkeypatch.setattr(workflow, "fetch_name", lambda *_a, **_k: Decision("escalate"))
+    monkeypatch.setattr(workflow, "fetch_ml", lambda *_a, **_k: MlResult("escalate"))
+    url = ata.ModelChain(
+        name=ata.TaskEndpoint(url="http://h:8080"), ml=ata.TaskEndpoint(url="http://h:8080")
+    )
+    workflow._require_model_imports(url)
+    monkeypatch.setattr("annotuneagent.local_lora.complete", lambda *_a, **_k: "{}")
+    local = ata.ModelChain(
+        name=ata.TaskEndpoint(adapter="name.gguf"), ml=ata.TaskEndpoint(adapter="ml.gguf")
+    )
+    workflow._require_model_imports(local)
+
+
 def test_missing_tokenizer_stack_fails_before_scoring(monkeypatch):
     import importlib.util
 
