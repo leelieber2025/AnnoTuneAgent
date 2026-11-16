@@ -179,6 +179,7 @@ def settle_cluster(
     min_margin: float = DEFAULT_MIN_MARGIN,
     dag=None,
     label_map=None,
+    unexplained: list[str] | None = None,
 ) -> dict[str, object]:
     """Write one name from marker, name, and ML.
 
@@ -197,10 +198,16 @@ def settle_cluster(
     marker, name, and ML do not all give the same name. When they do, that
     name is written and the hint lists every detected program from high score
     to low. NK and T programs that are both enriched against the other cells
-    do not receive one title. CD4 and CD8 names in the same call write T cell
+    do not receive one title, unless the top panel is a specific mature NK T
+    cell. CD4 and CD8 names in the same call write T cell
     instead of either child. Effector-memory CD8 does not win when a MAIT
     marker is enriched. A failed marker score with no ontology name
-    writes nothing. Agreement does not pick the name.
+    writes nothing. Agreement does not pick the name. Agreement is written
+    only when that name's positive panel is specific. A detected panel that
+    is not specific stays a review item. When no candidate panel is detected
+    in the majority of the cluster, no name is written. Endothelial cell is
+    still written when the other call is pericyte, an endothelial gene is
+    enriched, and no pericyte program gene is.
     """
     ml_name = ml.names[0] if ml is not None and ml.status == "named" and ml.names else None
     proposals: list[dict[str, str]] = []
@@ -302,7 +309,7 @@ def settle_cluster(
             reason = "evidence_conflict"
         if notes:
             hint = "; ".join(notes)
-    return {
+    settled = {
         "proposals": proposals,
         "added": list(added),
         "written_label": label,
@@ -310,7 +317,13 @@ def settle_cluster(
         "arbitration": status != "named",
         "final_status": status,
         "final_reason": reason,
+        "ranking": ranking,
+        "evidence": {"de_not_in_markers": list(unexplained or [])},
     }
+    _guard_written_label(settled)
+    settled.pop("ranking", None)
+    settled.pop("evidence", None)
+    return settled
 
 
 def _choose_label(
@@ -486,7 +499,14 @@ def cytotoxic_mixture(ranking: list[dict] | None) -> bool:
 
     Detection is not enough. Blood NK cells can carry CD3 because T cells
     dominate the sample. A title is withheld so the cluster can be split.
+    A top-ranked mature NK T cell whose own panel is specific is that cell
+    type, so the same two programs do not block it.
     """
+    rows = [row for row in ranking or [] if row.get("name")]
+    if rows:
+        top = rows[0]
+        if str(top.get("name")) == "mature NK T cell" and top.get("program_specific"):
+            return False
     flags = {
         str(row.get("name")): bool(row.get("program_specific"))
         for row in ranking or []
@@ -647,9 +667,124 @@ def _detected_programs(ranking, species, dag, label_map) -> list[tuple[str, floa
     return found
 
 
+def _row_support(row: dict) -> str:
+    """specific, detected, absent, or unknown for one ranking row."""
+    if row.get("program_specific") is True:
+        return "specific"
+    if row.get("program_on") is True:
+        return "detected"
+    judged = "program_on" in row or "program_specific" in row
+    if not judged:
+        return "unknown"
+    # One positive gene cannot satisfy program_detected. Do not treat that
+    # as proof that the dictionary has no matching cell.
+    count = row.get("n_positive")
+    if count is not None and int(count) < 2:
+        return "unknown"
+    return "absent"
+
+
+def _dictionary_gap(ranking) -> bool:
+    """True when every judged panel is absent from the majority of the cluster."""
+    supports = [_row_support(row) for row in ranking or []]
+    if any(item in {"specific", "detected"} for item in supports):
+        return False
+    return any(item == "absent" for item in supports)
+
+
+def _label_is_specific(label, ranking) -> bool:
+    return any(
+        row.get("name") == label and row.get("program_specific") is True for row in ranking or []
+    )
+
+
+def _unexplained_hint(genes) -> str:
+    names = [str(gene) for gene in genes or [] if str(gene)]
+    if not names:
+        return "no candidate marker is in the majority of this cluster"
+    return "unexplained: " + ", ".join(names[:10])
+
+
+# Identity genes the endothelial panel can miss, and the pericyte program.
+# Collagen is shared and is not read as either program.
+_ENDO_GENES = frozenset({"emcn", "gng11", "pecam1", "cdh5", "kdr", "cldn5", "flt1"})
+_PERI_GENES = frozenset({"rgs5", "pdgfrb", "kcnj8", "abcc9"})
+
+
+def _prefer_endothelial(record: dict, unexplained) -> bool:
+    """Endothelial cell when pericyte is the other call and only endothelium is enriched."""
+    names = {str(item.get("name")) for item in record.get("proposals") or [] if item.get("name")}
+    label = record.get("written_label")
+    if label:
+        names.add(str(label))
+    if "endothelial cell" not in names or "pericyte" not in names:
+        return False
+    genes = {str(gene).casefold() for gene in unexplained or []}
+    if not genes & _ENDO_GENES:
+        return False
+    return not genes & _PERI_GENES
+
+
+def _guard_written_label(record: dict) -> bool:
+    """Keep a weak agreement and withhold a name the dictionary does not detect.
+
+    ``evidence_agreement`` that is not program-specific stays written. The
+    hint is ``weak agreement on {label}``. When no candidate panel is detected
+    in the majority, the name is removed, the status is ``out_of_dictionary``,
+    and the hint lists the unexplained genes. Endothelial cell stays written
+    when the other call is pericyte and the enriched genes support endothelium.
+    A one-gene panel cannot be specific, so that agreement is left unchanged.
+    Presence is not read here. Returns True when the name was removed.
+    """
+    if record.get("final_status") != "named" or not record.get("written_label"):
+        return False
+    reason = record.get("final_reason")
+    if reason in {"subcluster_labels", "near_clear_cluster"}:
+        return False
+    ranking = record.get("ranking")
+    evidence = record.get("evidence") or {}
+    unexplained = evidence.get("de_not_in_markers") if isinstance(evidence, dict) else None
+    label = str(record["written_label"])
+    if _dictionary_gap(ranking):
+        if _prefer_endothelial(record, unexplained):
+            record["written_label"] = "endothelial cell"
+            record["hint"] = "endothelial cell rather than pericyte"
+            record["final_status"] = "review"
+            record["final_reason"] = "endothelial_not_pericyte"
+            record["arbitration"] = True
+            return False
+        record["written_label"] = None
+        record["hint"] = _unexplained_hint(unexplained)
+        record["final_status"] = "out_of_dictionary"
+        record["final_reason"] = "out_of_dictionary"
+        record["arbitration"] = True
+        return True
+    if reason == "evidence_agreement" and not _label_is_specific(label, ranking):
+        row = next((item for item in ranking or [] if item.get("name") == label), None)
+        count = None if row is None else row.get("n_positive")
+        # One positive gene is never program_specific. Leave that agreement as it is.
+        if count is not None and int(count) < 2:
+            return False
+        record["hint"] = f"weak agreement on {label}"
+        record["final_status"] = "review"
+        record["final_reason"] = "weak_agreement"
+        record["arbitration"] = True
+        return False
+    return False
+
+
+def _sync_guard(record: dict, resolved: dict) -> None:
+    if not _guard_written_label(record):
+        return
+    cluster = str(record["cluster"])
+    mapping = resolved.get(cluster)
+    if mapping and set(mapping) == {cluster}:
+        resolved.pop(cluster, None)
+
+
 def _needs_query(record: dict) -> bool:
-    """Unnamed clusters and named clusters that still carry a question."""
-    return not record.get("written_label") or bool(record.get("hint"))
+    """Every cluster gets an enriched-gene query."""
+    return True
 
 
 def _print_queries(records: list[dict]) -> None:
@@ -666,7 +801,7 @@ def _print_queries(records: list[dict]) -> None:
 
 
 def _attach_queries(adata, cluster_key, records, hypotheses, species, tissue) -> None:
-    """Pasteable gene features for unnamed clusters and clusters with a question."""
+    """Pasteable gene features for every cluster."""
     pending = [record for record in records if _needs_query(record)]
     if not pending:
         return
@@ -914,6 +1049,121 @@ def _subcluster(part: AnnData) -> bool:
     return True
 
 
+def _install_split(adata, cluster_key: str, mask, part: AnnData, parent: str) -> None:
+    """Write ``parent.child`` ids for one split. Other clusters keep their ids."""
+    if SUBCLUSTER_KEY not in adata.obs.columns:
+        adata.obs[SUBCLUSTER_KEY] = adata.obs[cluster_key].astype(str)
+    parent_labels = adata.obs.loc[mask, cluster_key].astype(str)
+    child_labels = part.obs[SUBCLUSTER_KEY].astype(str)
+    adata.obs.loc[mask, SUBCLUSTER_KEY] = [
+        f"{parent_id}.{child}" for parent_id, child in zip(parent_labels, child_labels, strict=True)
+    ]
+
+
+def _collapse_uniform_splits(adata, cluster_key, label_key, records, children, resolved):
+    """Drop a split whose cells all have one title.
+
+    A cytotoxic mixture stays split. Its title was withheld so the two
+    programs would not be scored as one marker label.
+    """
+    if SUBCLUSTER_KEY not in adata.obs.columns:
+        return children
+    by_id = {str(row["cluster"]): row for row in records}
+    kept = []
+    for item in children:
+        parent = str(item["parent"])
+        record = by_id.get(parent)
+        if record is not None and cytotoxic_mixture(record.get("ranking")):
+            kept.append(item)
+            continue
+        mask = adata.obs[cluster_key].astype(str) == parent
+        labels = adata.obs.loc[mask, label_key]
+        names = [str(value) for value in labels.dropna().unique()]
+        if len(names) != 1 or bool(labels.isna().any()):
+            kept.append(item)
+            continue
+        # Child ids are categories. The parent id is not one of them.
+        sub = adata.obs[SUBCLUSTER_KEY].astype(str)
+        sub.loc[mask] = parent
+        adata.obs[SUBCLUSTER_KEY] = sub
+        name = names[0]
+        resolved[parent] = {parent: name}
+        if record is not None and not record.get("written_label"):
+            record["written_label"] = name
+            record["final_status"] = "named"
+            if record.get("final_reason") == "subcluster_labels":
+                record["final_reason"] = "marker_rule"
+    if not kept:
+        del adata.obs[SUBCLUSTER_KEY]
+    return kept
+
+
+def _split_lineage_disagreements(
+    adata,
+    cluster_key,
+    records,
+    kept,
+    children,
+    by_parent,
+    resolved,
+    *,
+    min_margin,
+    ranker,
+    conformal_q,
+    min_subcluster_cells,
+    species,
+    dag,
+    label_map,
+    arbitration,
+) -> None:
+    """Split a cluster when the name and ML calls are different lineages.
+
+    The split is kept only when the children receive more than one marker
+    title. A marker title on the parent does not block this pass. A split
+    that does not separate is left unset, and the parent title stays.
+    """
+    for record in records:
+        cluster = str(record["cluster"])
+        if cytotoxic_mixture(record.get("ranking")):
+            continue
+        name = _proposal_name(record, "name")
+        ml = _proposal_name(record, "ml")
+        if not name or not ml or _same_lineage(name, ml, species, dag, label_map):
+            continue
+        mapping = resolved.get(cluster) or {}
+        if mapping and set(mapping) != {cluster}:
+            continue
+        mask = cluster_mask(adata, cluster_key, cluster)
+        if int(mask.sum()) < min_subcluster_cells:
+            continue
+        part = adata[mask].copy()
+        if not _subcluster(part):
+            continue
+        child_records = _annotate(part, SUBCLUSTER_KEY, kept, min_margin, ranker, conformal_q)
+        for child in child_records:
+            child["parent"] = cluster
+            child["cluster"] = f"{cluster}.{child['cluster']}"
+        child_names = {
+            str(row["cell_type"])
+            for row in child_records
+            if row.get("status") == "label" and row.get("cell_type")
+        }
+        if not _children_labeled(child_records) or len(child_names) < 2:
+            continue
+        _install_split(adata, cluster_key, mask, part, cluster)
+        resolved[cluster] = _child_label_map(child_records)
+        record["written_label"] = None
+        record["hint"] = None
+        record["arbitration"] = False
+        record["final_status"] = "named"
+        record["final_reason"] = "subcluster_labels"
+        while cluster in arbitration:
+            arbitration.remove(cluster)
+        children[:] = [item for item in children if str(item["parent"]) != cluster]
+        children.append({"parent": cluster, "records": child_records})
+        by_parent[cluster] = child_records
+
+
 def _cluster_order(cluster: str) -> tuple[int, object]:
     try:
         return (0, int(cluster))
@@ -1056,11 +1306,15 @@ def run(
     of the cluster, differential expression and marker-panel statistics, and
     copies a name from those candidates. Name and ML each receive their own
     payload. Clear clusters are written to ``label_key``. Uncertain clusters
-    are subclustered once. A cluster whose NK and T programs are both enriched
-    against the other cells is split even when the marker score named it.
+    are subclustered once. A split whose cells all receive one title is
+    dropped. A cluster is also split when the name and ML calls are different
+    lineages and the children receive more than one title. A cluster whose
+    NK and T panels are both specific is split even when the marker score
+    named it, unless the top panel is a specific mature NK T cell. Child
+    labels of that mixture are written only when every child has a label.
     Each step prints when it starts and how many seconds
-    it took. A cluster with no written name, or a written name that still has a
-    hint, prints a gene query that can be pasted into another model. A local
+    it took. Every cluster prints a gene query that can be pasted into another
+    model. A local
     server started for the adapters stays loaded after this call.
 
     With ``models``, the name and ML models are asked for every cluster, or
@@ -1117,7 +1371,6 @@ def run(
     children: list[dict[str, object]] = []
     if subcluster:
         with _timed("run  subcluster") as note:
-            split_any = False
             for record in records:
                 if record["status"] == "label" and not cytotoxic_mixture(record.get("ranking")):
                     continue
@@ -1133,15 +1386,7 @@ def run(
                 for child in child_records:
                     child["parent"] = str(record["cluster"])
                     child["cluster"] = f"{record['cluster']}.{child['cluster']}"
-                if not split_any:
-                    adata.obs[SUBCLUSTER_KEY] = adata.obs[cluster_key].astype(str)
-                    split_any = True
-                parent_labels = adata.obs.loc[mask, cluster_key].astype(str)
-                child_labels = part.obs[SUBCLUSTER_KEY].astype(str)
-                adata.obs.loc[mask, SUBCLUSTER_KEY] = [
-                    f"{parent}.{child}"
-                    for parent, child in zip(parent_labels, child_labels, strict=True)
-                ]
+                _install_split(adata, cluster_key, mask, part, str(record["cluster"]))
                 children.append({"parent": str(record["cluster"]), "records": child_records})
             note["detail"] = f"{len(children)} clusters"
     by_parent = {str(item["parent"]): item["records"] for item in children}
@@ -1208,7 +1453,33 @@ def run(
         )
         record["written_label"] = mapping.get(cluster)
         record["hint"] = None
+        if not mapping and cytotoxic_mixture(record.get("ranking")):
+            record["final_reason"] = "cytotoxic_mixture"
+            record["hint"] = "NK and T programs are both enriched"
+        _sync_guard(record, resolved)
     _apply_neighbor_titles(adata, cluster_key, records, resolved, species, dag, label_map)
+    _fill_blank_labels_by_umap(adata, cluster_key, records, resolved, species, dag, label_map)
+    if subcluster and models is not None:
+        with _timed("run  split disagreements") as note:
+            before = len(children)
+            _split_lineage_disagreements(
+                adata,
+                cluster_key,
+                records,
+                kept,
+                children,
+                by_parent,
+                resolved,
+                min_margin=min_margin,
+                ranker=ranker,
+                conformal_q=conformal_q,
+                min_subcluster_cells=min_subcluster_cells,
+                species=species,
+                dag=dag,
+                label_map=label_map,
+                arbitration=arbitration,
+            )
+            note["detail"] = f"{len(children) - before} clusters"
     _attach_queries(adata, cluster_key, records, [*kept, *added_hypotheses], species, tissue)
     labels = _assign_labels(adata, cluster_key, resolved)
     written = bool(labels.notna().any())
@@ -1262,6 +1533,19 @@ def run(
         )
         _attach_queries(adata, cluster_key, records, [*kept, *added_hypotheses], species, tissue)
         note["detail"] = f"{len(marker_dict)} types"
+    children = _collapse_uniform_splits(adata, cluster_key, label_key, records, children, resolved)
+    labels = _assign_labels(adata, cluster_key, resolved)
+    written = bool(labels.notna().any())
+    adata.obs[label_key] = labels.astype("category")
+    all_labeled = bool(written) and bool(labels.notna().all())
+    status_by_cluster = {str(record["cluster"]): record["final_status"] for record in records}
+    hint_by_cluster = {str(record["cluster"]): record.get("hint") for record in records}
+    adata.obs["annotune_final_status"] = (
+        adata.obs[cluster_key].astype(str).map(status_by_cluster).astype("category")
+    )
+    adata.obs["annotune_hint"] = (
+        adata.obs[cluster_key].astype(str).map(hint_by_cluster).astype("string")
+    )
     type_order = list(dict.fromkeys(adata.obs[label_key].dropna().astype(str)))
     plot = (
         plot_marker_panels(adata, label_key, marker_dict, type_order, dotplot_path)
@@ -1402,10 +1686,15 @@ def _review_rows(clusters: list[dict[str, object]]) -> list[dict[str, object]]:
 
 
 def _review_priority(row: dict[str, object]) -> int | None:
-    if not row.get("label"):
-        return 0
     reason = str(row.get("reason") or "")
     hint = str(row.get("hint") or "")
+    if (
+        reason in {"weak_agreement", "out_of_dictionary", "endothelial_not_pericyte"}
+        or "endothelial cell rather than pericyte" in hint
+    ):
+        return 1
+    if not row.get("label"):
+        return 0
     if "evidence_conflict" in reason or hint.startswith("conflict") or "close marker" in hint:
         return 1
     if "model_failure" in reason or "model call failed" in hint:
@@ -1737,6 +2026,7 @@ def _run_models(
             if not blocked:
                 top = str(record["cell_type"])
                 labeled = True
+        unexplained = list((record.get("evidence") or {}).get("de_not_in_markers") or [])
         settled = settle_cluster(
             marker=top,
             name=name,
@@ -1752,6 +2042,7 @@ def _run_models(
             min_margin=min_margin,
             dag=dag,
             label_map=label_map,
+            unexplained=unexplained,
         )
         if settled["written_label"]:
             resolved[cluster] = {cluster: str(settled["written_label"])}
@@ -1888,6 +2179,7 @@ def _flag_labels_without_markers(
             record["final_reason"] = "marker_rule"
             record["hint"] = None
             resolved[cluster] = {cluster: str(marker)}
+            _sync_guard(record, resolved)
             continue
         agreed = _agreed_model_name(record, species, dag, label_map)
         if agreed and not _same_lineage(agreed, str(label), species, dag, label_map):
@@ -1899,13 +2191,16 @@ def _flag_labels_without_markers(
             )
             record["hint"] = f"conflict: marker {marker}" if marker and marker != agreed else None
             resolved[cluster] = {cluster: agreed}
+            _sync_guard(record, resolved)
             continue
         if record.get("final_reason") == "no_marker_passed":
+            _sync_guard(record, resolved)
             continue
         record["final_status"] = "named"
         record["final_reason"] = "no_marker_passed"
         hint = record.get("hint")
         record["hint"] = "no marker passed" if not hint else f"{hint}; no marker passed"
+        _sync_guard(record, resolved)
     return changed
 
 
@@ -2272,6 +2567,87 @@ def _connectivity_ratios(labels: np.ndarray, adjacency) -> dict[str, list[tuple[
     return result
 
 
+def _fill_blank_labels_by_umap(
+    adata, cluster_key, records, resolved, species, dag, label_map
+) -> None:
+    """Give a blank cluster a name that is already written on a neighbor.
+
+    Two clusters are connected when their closest cells are within two typical
+    neighbor spacings. The blank cluster takes the connected name with the
+    smaller distance. A name withheld as ``out_of_dictionary`` is not copied.
+    The hint records the neighbor and the distance.
+    """
+    if "X_umap" not in adata.obsm:
+        return
+    coords = np.asarray(adata.obsm["X_umap"], dtype=float)
+    if coords.ndim != 2 or coords.shape[0] != adata.n_obs or coords.shape[1] < 2:
+        return
+    spacing = _umap_spacing(coords)
+    if spacing is None:
+        return
+    labels = adata.obs[cluster_key].astype(str).to_numpy()
+    by_id = {str(record["cluster"]): record for record in records}
+    donors = []
+    for cluster, record in by_id.items():
+        if not record.get("written_label"):
+            continue
+        if record.get("final_reason") in {"out_of_dictionary", "subcluster_labels"}:
+            continue
+        donors.append((cluster, str(record["written_label"])))
+    if not donors:
+        return
+    # A gap of about one neighbor is still the same neighborhood on the UMAP.
+    limit = 2 * spacing
+    del species, dag, label_map
+    clouds = {cluster: coords[labels == cluster] for cluster, _label in donors}
+    for record in records:
+        cluster = str(record["cluster"])
+        if record.get("written_label") or record.get("final_reason") == "subcluster_labels":
+            continue
+        mapping = resolved.get(cluster)
+        if mapping and set(mapping) != {cluster}:
+            continue
+        own = coords[labels == cluster]
+        if own.size == 0:
+            continue
+        measured = []
+        for other, label in donors:
+            cloud = clouds.get(other)
+            if other == cluster or cloud is None or cloud.size == 0:
+                continue
+            measured.append((_min_point_distance(own, cloud), other, label))
+        if not measured:
+            continue
+        best_distance, best_other, best_label = min(measured, key=lambda item: item[0])
+        if best_distance > limit:
+            continue
+        note = f"near {best_other} {best_label}, umap distance {best_distance:.2f}"
+        record["written_label"] = best_label
+        record["final_status"] = "named"
+        record["final_reason"] = "near_clear_cluster"
+        record["hint"] = note if not record.get("hint") else f"{record['hint']}; {note}"
+        resolved[cluster] = {cluster: best_label}
+
+
+def _umap_spacing(coords: np.ndarray) -> float | None:
+    from scipy.spatial import cKDTree
+
+    if coords.shape[0] < 2:
+        return None
+    distances, _indexes = cKDTree(coords).query(coords, k=2)
+    spacing = float(np.median(distances[:, 1]))
+    if not np.isfinite(spacing) or spacing <= 0:
+        return None
+    return spacing
+
+
+def _min_point_distance(left: np.ndarray, right: np.ndarray) -> float:
+    from scipy.spatial import cKDTree
+
+    distances, _indexes = cKDTree(right).query(left, k=1)
+    return float(np.min(distances))
+
+
 def _umap_adjacency(coords: np.ndarray):
     """Cells within one typical UMAP neighbor-spacing of each other."""
     from scipy.spatial import cKDTree
@@ -2327,7 +2703,9 @@ def _resolved_labels(adata, cluster_key, records, by_parent) -> dict[str, dict[s
                 for row in children
                 if row.get("status") == "label" and row.get("cell_type")
             }
-            if child_map:
+            # One labeled child is not a name for the parent. The unlabeled
+            # cells would stay blank while the report said the cluster was named.
+            if children and len(child_map) == len(children):
                 resolved[cluster] = child_map
             continue
         if record["status"] == "label":

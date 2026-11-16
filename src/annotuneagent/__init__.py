@@ -10,7 +10,10 @@ Recommended usage::
     records = ata.annotate(adata, cluster_key="leiden", hypotheses=[...])
     adata = ata.read_10x(base_dir, ["sample_a", "sample_b"])
     info = ata.geo_info("GSE341410")
-    adata = ata.read_geo(info, samples=["B1", "B3"], groups="B1: control B3: Day7")
+    adata = ata.read_geo(
+        info, samples=["B1", "B3"], groups="B1: control B3: Day7",
+        obs={"day": "B1: 0 B3: 7", "treatment": "B1: none B3: C&AIA"},
+    )
     prepared = ata.prepare(adata, species="human", batch_key="sample")
     report = ata.run(
         prepared, "leiden", species="human",
@@ -21,7 +24,9 @@ Recommended usage::
 collects three results, the marker score, the name model, and the ML model,
 then a judgment writes the title to ``annotune_label``. The title is a
 dictionary name. A cluster can stay unnamed. Uncertain clusters are
-subclustered once. The name and ML models run when a ``ModelChain`` is
+subclustered once. A cluster whose NK and T panels are both specific is split
+even when the marker score named it, unless the top panel is a specific
+mature NK T cell. The name and ML models run when a ``ModelChain`` is
 supplied. The name model copies a cell-type name from the marker dictionary.
 The ML model is trained on machine-learning measurements of the cluster,
 differential expression and marker-panel statistics, and copies a name from
@@ -31,10 +36,14 @@ ml adapters. The tokenizer is installed with the package. The server is
 ``http://127.0.0.1:8080`` unless ``url`` or ``ANNOTUNE_URL`` says otherwise.
 A matching server is reused. When the process list is unavailable, the check
 reads ``/props`` and ``/lora-adapters``. ``TaskEndpoint(url=...)`` calls
-``/completion`` on that server and enables one adapter per request.
+``/completion`` on that server and enables one adapter per request. On a
+server this process did not start, those ids come from the adapter file
+names. Name is id 0 and ml is id 1 until that parse succeeds, and only a
+successful parse is reused.
 ``attach`` connects to an existing service without loading weights.
 Model requests wait 600 seconds unless ``timeout`` or ``ANNOTUNE_TIMEOUT``
-says otherwise.
+says otherwise. ``ANNOTUNE_API_KEY`` is sent as a bearer token when the
+server was started with ``--api-key``.
 """
 
 from __future__ import annotations

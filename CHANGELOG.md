@@ -2,6 +2,61 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.1.4] - 2026-11-16
+
+### Fixed
+
+- A cytotoxic mixture that is not fully split stays `review`, with reason
+  `cytotoxic_mixture` and a hint that NK and T programs are both enriched.
+  `evaluate` scores a workflow record by `written_label`, so that cluster is
+  not counted as a marker hit. Pass `prediction_key="annotune_label"` to score
+  the labels written on the cells.
+- Child labels of a cytotoxic mixture are written only when every child has a
+  label.
+- `annotate` skips a support gene that is absent from the matrix.
+- Adapter ids from `/lora-adapters` are cached only after the name file and
+  the ml file are both parsed. A failed read, or a list that does not name
+  both adapters, is tried again on the next request. Until then the load
+  order is name 0 and ml 1.
+
+### Changed
+
+- `evidence_agreement` that is not program-specific stays written. The hint
+  is `weak agreement on {label}` and the cluster stays in the review list.
+  A one-gene panel cannot meet the specific test, so that agreement is left
+  unchanged. When no candidate panel is detected in the majority, the status
+  is `out_of_dictionary`, no name is written, and the hint lists genes that
+  are high and not in the dictionary panels.
+- A cluster with no title takes a name that is already written on a cluster
+  it touches on the UMAP. Connection is the distance between the closest
+  cells, within two typical neighbor spacings. The shorter distance wins.
+  A name withheld as `out_of_dictionary` is not copied. The hint records the
+  neighbor and the distance.
+- A subcluster whose cells all receive one title is dropped. The parent
+  keeps that title, and the child ids are not left as unresolved clusters.
+  A cytotoxic mixture is left split.
+- A cluster is split when the name model and the ML model name different
+  lineages, including one the marker score already named. The split is kept
+  only when the children receive more than one title.
+- When no panel is detected and the calls are endothelial cell and pericyte,
+  endothelial cell is written if an endothelial gene is enriched and no
+  pericyte program gene is. The hint is `endothelial cell rather than pericyte`.
+- Each ranking row records `presence`, the mean fraction of cluster cells
+  that express the positive markers. Presence does not choose the name.
+- Every cluster gets an enriched-gene query.
+- `read_geo` stores each GEO characteristic on `obs`. A time point is also
+  `obs["day"]`, and a treatment or stimulus is also `obs["treatment"]`. Those
+  words are read from the sample title when the record does not name them.
+  `obs={...}` adds or replaces sample-level columns with the same syntax as
+  `groups`.
+- The docs state that one missing positive gene stays in the panel and scores
+  0. `ANNOTUNE_API_KEY` is documented for a server started with `--api-key`.
+- A cluster whose top marker panel is a specific `mature NK T cell` is named
+  as that type. NK and T programs that are both specific still withhold a
+  title when another type ranks first.
+- Limb `Schwann cell` uses `MOG`/`Mog` as the oligodendrocyte negative marker.
+  `PLP1`/`Plp1` stays off that negative list because Schwann cells express it.
+
 ## [0.1.3] - 2026-11-11
 
 ### Added

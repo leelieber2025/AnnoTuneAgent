@@ -5,7 +5,7 @@ import pytest
 from anndata import AnnData
 from scipy import sparse
 
-from annotuneagent import Hypothesis, hypotheses_from_names, local_models, run
+from annotuneagent import Hypothesis, evaluate, hypotheses_from_names, local_models, run
 from annotuneagent import workflow as wf
 from annotuneagent.decide import Decision, MlResult, wilcoxon_order
 from annotuneagent.local_lora import scales_for
@@ -682,8 +682,15 @@ def test_model_retest_uses_training_payload_and_writes_the_name():
         subcluster=False,
     )
     assert seen and "dictionary_hits" in seen[0]
-    assert adata.obs["annotune_label"].iloc[0] == "CD4 T"
-    assert "'0': 'CD4 T'" in report["annotation_code"]
+    cluster0 = next(row for row in report["records"] if row["cluster"] == "0")
+    assert cluster0["written_label"] == "CD4 T"
+    assert cluster0["final_reason"] == "weak_agreement"
+    assert cluster0["hint"] == "weak agreement on CD4 T"
+    assert set(adata.obs["annotune_label"].iloc[:20].astype(str)) == {"CD4 T"}
+    assert any(
+        row["cluster"] == "0" and row["hint"] == "weak agreement on CD4 T"
+        for row in report["review"]
+    )
 
 
 def test_name_and_ml_both_run_with_their_own_payloads():
@@ -747,7 +754,7 @@ def test_unmapped_name_with_a_failed_marker_score_is_not_written():
     assert "0" in report["arbitration"]
 
 
-def test_ontology_name_is_written_when_the_marker_name_disagrees():
+def test_an_unsupported_model_name_is_not_written():
     adata = _pure()
 
     def name(_payload):
@@ -766,14 +773,13 @@ def test_ontology_name_is_written_when_the_marker_name_disagrees():
         subcluster=False,
     )
     cluster0 = next(row for row in report["records"] if row["cluster"] == "0")
-    assert cluster0["written_label"] == "B cell"
-    assert cluster0["final_status"] == "named"
-    assert cluster0["final_reason"] == "evidence_conflict"
-    assert cluster0["hint"] == "conflict: marker CD8 T"
-    assert cluster0["arbitration"] is False
-    assert set(adata.obs["annotune_label"].iloc[:20]) == {"B cell"}
-    assert set(adata.obs["annotune_hint"].iloc[:20]) == {"conflict: marker CD8 T"}
-    assert "'0': 'B cell'" in report["annotation_code"]
+    assert cluster0["written_label"] is None
+    assert cluster0["final_status"] == "out_of_dictionary"
+    assert cluster0["final_reason"] == "out_of_dictionary"
+    assert cluster0["hint"] == "no candidate marker is in the majority of this cluster"
+    assert list(adata.obs["annotune_label"].iloc[:20].isna()) == [True] * 20
+    assert "'0': 'B cell'" not in report["annotation_code"]
+    assert any(row["cluster"] == "0" for row in report["review"])
 
 
 def test_name_ml_disagreement_writes_the_model_name_with_a_hint():
@@ -815,6 +821,15 @@ def test_agreed_name_is_written_without_a_hint():
         ml=MlResult("named", ("B cell",)),
         added=[],
         cells=100,
+        ranking=[
+            {
+                "name": "B cell",
+                "score": 1.0,
+                "program_on": True,
+                "program_specific": True,
+                "n_positive": 2,
+            }
+        ],
     )
     assert settled["written_label"] == "B cell"
     assert settled["hint"] is None
@@ -822,10 +837,244 @@ def test_agreed_name_is_written_without_a_hint():
     assert settled["final_status"] == "named"
 
 
+def test_one_gene_agreement_stays_written():
+    settled = settle_cluster(
+        marker="TA",
+        name="TA",
+        ml=MlResult("escalate"),
+        added=[],
+        cells=40,
+        ranking=[
+            {
+                "name": "TA",
+                "score": 1.0,
+                "program_on": False,
+                "program_specific": False,
+                "n_positive": 1,
+            }
+        ],
+    )
+    assert settled["written_label"] == "TA"
+    assert settled["hint"] is None
+    assert settled["final_reason"] == "evidence_agreement"
+
+
+def test_agreement_without_specific_markers_stays_written_for_review():
+    detected = settle_cluster(
+        marker="B cell",
+        name="B cell",
+        ml=MlResult("named", ("B cell",)),
+        added=[],
+        cells=100,
+        ranking=[
+            {
+                "name": "B cell",
+                "score": 1.0,
+                "program_on": True,
+                "program_specific": False,
+                "n_positive": 2,
+            }
+        ],
+    )
+    assert detected["written_label"] == "B cell"
+    assert detected["final_status"] == "review"
+    assert detected["final_reason"] == "weak_agreement"
+    assert detected["hint"] == "weak agreement on B cell"
+    gap = settle_cluster(
+        marker="innate lymphoid cell",
+        name="innate lymphoid cell",
+        ml=MlResult("named", ("innate lymphoid cell",)),
+        added=[],
+        cells=149,
+        ranking=[
+            {
+                "name": "innate lymphoid cell",
+                "score": 0.2,
+                "program_on": False,
+                "program_specific": False,
+                "n_positive": 4,
+            }
+        ],
+        unexplained=["KRT8", "KRT18"],
+    )
+    assert gap["written_label"] is None
+    assert gap["final_status"] == "out_of_dictionary"
+    assert gap["final_reason"] == "out_of_dictionary"
+    assert gap["hint"] == "unexplained: KRT8, KRT18"
+
+
+def _absent(name: str, score: float) -> dict:
+    return {
+        "name": name,
+        "score": score,
+        "program_on": False,
+        "program_specific": False,
+        "n_positive": 5,
+    }
+
+
+def test_endothelial_is_written_when_pericyte_genes_are_absent():
+    settled = settle_cluster(
+        marker="pericyte",
+        name="endothelial cell",
+        ml=MlResult("named", ("pericyte",)),
+        added=[],
+        cells=342,
+        ranking=[_absent("pericyte", 0.9), _absent("endothelial cell", 0.2)],
+        unexplained=["Emcn", "Gng11", "Col4a1"],
+    )
+    assert settled["written_label"] == "endothelial cell"
+    assert settled["final_status"] == "review"
+    assert settled["final_reason"] == "endothelial_not_pericyte"
+    assert settled["hint"] == "endothelial cell rather than pericyte"
+    blocked = settle_cluster(
+        marker="pericyte",
+        name="endothelial cell",
+        ml=MlResult("named", ("pericyte",)),
+        added=[],
+        cells=342,
+        ranking=[_absent("pericyte", 0.9), _absent("endothelial cell", 0.2)],
+        unexplained=["Emcn", "Rgs5"],
+    )
+    assert blocked["written_label"] is None
+    assert blocked["final_reason"] == "out_of_dictionary"
+    plain = settle_cluster(
+        marker="pericyte",
+        name="endothelial cell",
+        ml=MlResult("named", ("pericyte",)),
+        added=[],
+        cells=342,
+        ranking=[_absent("pericyte", 0.9), _absent("endothelial cell", 0.2)],
+        unexplained=["Col4a1", "Igfbp7"],
+    )
+    assert plain["written_label"] is None
+
+
+def _force_half_split(part):
+    n = part.n_obs
+    part.obs[wf.SUBCLUSTER_KEY] = np.array(["0"] * (n // 2) + ["1"] * (n - n // 2))
+    return True
+
+
+def test_a_uniform_split_is_collapsed(monkeypatch):
+    monkeypatch.setattr(wf, "_subcluster", _force_half_split)
+    genes = ["CD3E", "IL7R", "CD8A", "CD8B", "MS4A1"]
+    x = np.zeros((120, len(genes)), dtype=float)
+    x[:80, :4] = 5
+    x[80:, 4] = 5
+    adata = AnnData(X=x, obs={"leiden": ["0"] * 80 + ["1"] * 40})
+    adata.var_names = genes
+    adata.uns["log1p"] = {"base": None}
+    cd4 = "CD4-positive, alpha-beta T cell"
+    report = run(
+        adata,
+        "leiden",
+        species="human",
+        hypotheses=hypotheses_from_names(
+            [cd4, "CD8-positive, alpha-beta T cell", "B cell"], "human"
+        ),
+        models=_chain(
+            lambda _payload: Decision("retest", (cd4,)),
+            lambda _payload: MlResult("named", (cd4,)),
+        ),
+        model_clusters=["0"],
+        min_subcluster_cells=80,
+        min_margin=2,
+    )
+    assert "annotune_sub" not in adata.obs.columns
+    assert report["subclusters"] == []
+    assert set(adata.obs.loc[adata.obs["leiden"] == "0", "annotune_label"].astype(str)) == {
+        "T cell"
+    }
+    assert "0.0" not in report["annotation_code"]
+    assert "'0': 'T cell'" in report["annotation_code"]
+    choices = report["annotation_code"].split("# unresolved clusters")
+    assert len(choices) == 1 or "'0':" not in choices[1]
+
+
+def test_a_named_cluster_is_split_when_name_and_ml_differ(monkeypatch):
+    def force(part):
+        n = part.n_obs
+        part.obs[wf.SUBCLUSTER_KEY] = np.array(["0"] * 70 + ["1"] * (n - 70))
+        return True
+
+    monkeypatch.setattr(wf, "_subcluster", force)
+    genes = ["CD3E", "IL7R", "CD8A", "CD8B", "MS4A1"]
+    x = np.zeros((120, len(genes)), dtype=float)
+    x[:70, 0] = 5
+    x[:70, 1] = 5
+    x[70:80, 0] = 5
+    x[70:80, 2] = 5
+    x[70:80, 3] = 5
+    x[80:, 4] = 5
+    adata = AnnData(X=x, obs={"leiden": ["0"] * 80 + ["1"] * 40})
+    adata.var_names = genes
+    adata.uns["log1p"] = {"base": None}
+    cd4 = "CD4-positive, alpha-beta T cell"
+    cd8 = "CD8-positive, alpha-beta T cell"
+    report = run(
+        adata,
+        "leiden",
+        species="human",
+        hypotheses=hypotheses_from_names([cd4, cd8, "B cell"], "human"),
+        models=_chain(
+            lambda _payload: Decision("retest", (cd8,)),
+            lambda _payload: MlResult("named", (cd4,)),
+        ),
+        model_clusters=["0"],
+        min_subcluster_cells=80,
+    )
+    labels = adata.obs.loc[adata.obs["leiden"].astype(str) == "0", "annotune_label"].astype(str)
+    assert set(labels.unique()) == {cd4, cd8}
+    parent = next(row for row in report["records"] if row["cluster"] == "0")
+    assert parent["written_label"] is None
+    assert parent["final_reason"] == "subcluster_labels"
+    assert any(item["parent"] == "0" for item in report["subclusters"])
+    assert "'0.0'" in report["annotation_code"]
+    assert "'0.1'" in report["annotation_code"]
+
+
+def test_a_nearest_name_without_majority_markers_is_not_written():
+    x = np.zeros((40, 4), dtype=float)
+    x[:20, 0] = 5
+    x[20:, 2] = 5
+    x[20:, 3] = 5
+    adata = AnnData(X=x, obs={"leiden": ["0"] * 20 + ["1"] * 20})
+    adata.var_names = ["A", "B", "C", "D"]
+    adata.uns["log1p"] = {"base": None}
+    report = run(
+        adata,
+        "leiden",
+        hypotheses=[
+            Hypothesis("Blood cell", positive=("A", "B")),
+            Hypothesis("Other cell", positive=("C", "D")),
+        ],
+        subcluster=False,
+    )
+    by_id = {row["cluster"]: row for row in report["records"]}
+    assert by_id["0"]["final_status"] == "out_of_dictionary"
+    assert by_id["0"]["written_label"] is None
+    assert by_id["0"]["hint"]
+    assert by_id["0"]["query"]
+    assert by_id["1"]["written_label"] == "Other cell"
+    assert by_id["1"]["final_reason"] == "marker_rule"
+    assert "What cell type is this cluster?" in by_id["1"]["query"]
+    assert by_id["1"]["ranking"][0]["presence"] > 0.5
+    assert list(adata.obs["annotune_label"].iloc[:20].isna()) == [True] * 20
+    assert set(adata.obs["annotune_label"].iloc[20:].astype(str)) == {"Other cell"}
+    assert any(row["cluster"] == "0" for row in report["review"])
+
+
 def test_finer_lineage_name_is_written_when_its_marker_score_passes():
     ranking = [
-        {"name": "CD14-positive monocyte", "score": 0.8},
-        {"name": "monocyte", "score": 0.3},
+        {
+            "name": "CD14-positive monocyte",
+            "score": 0.8,
+            "program_on": True,
+            "program_specific": True,
+            "n_positive": 2,
+        },
+        {"name": "monocyte", "score": 0.3, "program_on": True, "program_specific": True},
     ]
     settled = settle_cluster(
         marker="CD14-positive monocyte",
@@ -845,8 +1094,8 @@ def test_finer_lineage_name_is_written_when_its_marker_score_passes():
 
 def test_coarser_name_is_kept_when_the_finer_marker_score_fails():
     ranking = [
-        {"name": "monocyte", "score": 0.8},
-        {"name": "CD14-positive monocyte", "score": 0.2},
+        {"name": "monocyte", "score": 0.8, "program_on": True, "program_specific": True},
+        {"name": "CD14-positive monocyte", "score": 0.2, "program_on": False},
     ]
     settled = settle_cluster(
         marker="monocyte",
@@ -991,7 +1240,7 @@ def test_platelet_without_a_monocyte_program_keeps_its_name():
 
 def test_small_cluster_with_two_programs_keeps_a_unanimous_name():
     ranking = [
-        {"name": "NK cell", "score": 1.70, "program_on": True},
+        {"name": "NK cell", "score": 1.70, "program_on": True, "program_specific": True},
         {"name": "CD56dim NK cell", "score": 1.47, "program_on": True},
         {"name": "monocyte", "score": 0.40, "program_on": True},
     ]
@@ -1230,8 +1479,13 @@ def test_report_lists_missing_genes_and_review_order():
 
 def test_alveolar_fibroblast_is_kept_when_its_panel_is_on():
     ranking = [
-        {"name": "fibroblast", "score": 0.90, "program_on": True},
-        {"name": "alveolar fibroblast", "score": 0.40, "program_on": True},
+        {"name": "fibroblast", "score": 0.90, "program_on": True, "program_specific": True},
+        {
+            "name": "alveolar fibroblast",
+            "score": 0.40,
+            "program_on": True,
+            "program_specific": True,
+        },
     ]
     settled = settle_cluster(
         marker="fibroblast",
@@ -1253,7 +1507,7 @@ def test_alveolar_fibroblast_is_kept_when_its_panel_is_on():
         cells=1493,
         species="mouse",
         ranking=[
-            {"name": "fibroblast", "score": 0.90, "program_on": True},
+            {"name": "fibroblast", "score": 0.90, "program_on": True, "program_specific": True},
             {"name": "alveolar fibroblast", "score": 0.40, "program_on": False},
         ],
         margin=0.10,
@@ -1264,8 +1518,8 @@ def test_alveolar_fibroblast_is_kept_when_its_panel_is_on():
 
 def test_a_named_macrophage_subtype_is_kept_when_its_panel_is_on():
     ranking = [
-        {"name": "macrophage", "score": 0.90, "program_on": True},
-        {"name": "Kupffer cell", "score": 0.40, "program_on": True},
+        {"name": "macrophage", "score": 0.90, "program_on": True, "program_specific": True},
+        {"name": "Kupffer cell", "score": 0.40, "program_on": True, "program_specific": True},
     ]
     settled = settle_cluster(
         marker="macrophage",
@@ -1287,7 +1541,7 @@ def test_a_named_macrophage_subtype_is_kept_when_its_panel_is_on():
         cells=2110,
         species="human",
         ranking=[
-            {"name": "macrophage", "score": 0.90, "program_on": True},
+            {"name": "macrophage", "score": 0.90, "program_on": True, "program_specific": True},
             {"name": "Kupffer cell", "score": 0.40, "program_on": False},
         ],
         margin=0.50,
@@ -1305,7 +1559,7 @@ def test_t_cell_subtype_is_not_upgraded_like_alveolar_fibroblast():
         cells=190,
         species="human",
         ranking=[
-            {"name": "T cell", "score": 0.80, "program_on": True},
+            {"name": "T cell", "score": 0.80, "program_on": True, "program_specific": True},
             {"name": "CD8-positive, alpha-beta T cell", "score": 0.40, "program_on": True},
         ],
         margin=0.40,
@@ -1354,7 +1608,13 @@ def test_both_cd4_and_cd8_write_t_cell():
         cells=400,
         species="human",
         ranking=[
-            {"name": "CD8-positive, alpha-beta T cell", "score": 1.2, "eligible": True},
+            {
+                "name": "CD8-positive, alpha-beta T cell",
+                "score": 1.2,
+                "eligible": True,
+                "program_on": True,
+                "program_specific": True,
+            },
             {"name": "CD4-positive, alpha-beta T cell", "score": 0.2, "eligible": True},
         ],
         margin=1.0,
@@ -1445,6 +1705,99 @@ def test_nk_and_t_enriched_together_get_no_single_title():
         marker_labeled=False,
     )
     assert blood["written_label"] == "NK cell"
+
+
+def test_specific_mature_nkt_is_not_a_cytotoxic_mixture():
+    ranking = [
+        {"name": "mature NK T cell", "score": 1.4, "program_specific": True},
+        {"name": "NK cell", "score": 1.1, "program_specific": True},
+        {"name": "T cell", "score": 0.8, "program_specific": True},
+    ]
+    assert wf.cytotoxic_mixture(ranking) is False
+    settled = settle_cluster(
+        marker="mature NK T cell",
+        name="mature NK T cell",
+        ml=MlResult("named", ("mature NK T cell",)),
+        added=[],
+        cells=60,
+        species="human",
+        ranking=ranking,
+        margin=0.3,
+        marker_labeled=True,
+    )
+    assert settled["written_label"] == "mature NK T cell"
+    assert settled["final_reason"] == "evidence_agreement"
+    second = [
+        {"name": "T cell", "score": 1.4, "program_specific": True},
+        {"name": "mature NK T cell", "score": 1.2, "program_specific": True},
+        {"name": "NK cell", "score": 1.0, "program_specific": True},
+    ]
+    assert wf.cytotoxic_mixture(second) is True
+    nonspecific = [
+        {"name": "mature NK T cell", "score": 1.4, "program_specific": False},
+        {"name": "NK cell", "score": 1.1, "program_specific": True},
+        {"name": "T cell", "score": 0.8, "program_specific": True},
+    ]
+    assert wf.cytotoxic_mixture(nonspecific) is True
+
+
+def test_mixture_child_labels_require_every_child():
+    from annotuneagent.workflow import _resolved_labels
+
+    ranking = [
+        {"name": "NK cell", "program_specific": True},
+        {"name": "T cell", "program_specific": True},
+    ]
+    record = {"cluster": "0", "status": "label", "cell_type": "T cell", "ranking": ranking}
+    partial = [
+        {"cluster": "0.0", "status": "label", "cell_type": "mature NK T cell"},
+        {"cluster": "0.1", "status": "uncertain", "cell_type": None},
+    ]
+    assert "0" not in _resolved_labels(None, "leiden", [record], {"0": partial})
+    complete = [
+        {"cluster": "0.0", "status": "label", "cell_type": "NK cell"},
+        {"cluster": "0.1", "status": "label", "cell_type": "T cell"},
+    ]
+    assert _resolved_labels(None, "leiden", [record], {"0": complete})["0"] == {
+        "0.0": "NK cell",
+        "0.1": "T cell",
+    }
+
+
+def test_unsplit_cytotoxic_mixture_is_not_scored_as_its_marker_label():
+    nk = ("NKG7", "GNLY", "KLRD1", "KLRF1")
+    tcell = ("CD3D", "CD3E", "CD3G", "TRAC")
+    bcell = ("MS4A1", "CD79A", "CD79B", "CD19", "BANK1")
+    genes = [*nk, *tcell, *bcell]
+    x = np.zeros((120, len(genes)), dtype=float)
+    for gene in (*nk, *tcell):
+        x[:80, genes.index(gene)] = 5
+    for gene in bcell:
+        x[80:, genes.index(gene)] = 5
+    adata = AnnData(X=x, obs={"leiden": ["0"] * 80 + ["1"] * 40})
+    adata.var_names = genes
+    adata.uns["log1p"] = {"base": None}
+    report = run(
+        adata,
+        "leiden",
+        species="human",
+        hypotheses=hypotheses_from_names(["NK cell", "T cell", "B cell"], "human"),
+        subcluster=False,
+    )
+    parent = next(row for row in report["records"] if str(row["cluster"]) == "0")
+    labels = adata.obs.loc[adata.obs["leiden"].astype(str) == "0", "annotune_label"]
+    assert labels.isna().all()
+    assert parent["status"] == "label"
+    assert parent["written_label"] is None
+    assert parent["final_status"] == "review"
+    assert parent["final_reason"] == "cytotoxic_mixture"
+    assert parent["hint"] == "NK and T programs are both enriched"
+    adata.obs["author"] = np.where(adata.obs["leiden"].astype(str) == "0", "T cell", "B cell")
+    summary = evaluate(report["records"], adata, "leiden", "author")
+    by_cluster = {row["cluster"]: row for row in summary["clusters"]}
+    assert by_cluster["0"]["status"] == "uncertain"
+    assert by_cluster["0"]["exact"] is False
+    assert by_cluster["1"]["exact"] is True
 
 
 def test_cytotoxic_mixture_is_split_even_when_the_marker_names_it():
@@ -1975,6 +2328,105 @@ def test_umap_closeness_gives_the_clear_title_without_a_neighbor_graph():
     assert unclear["written_label"] == "fibroblast"
     assert unclear["hint"] == "near 1 fibroblast"
     assert resolved["0"] == {"0": "fibroblast"}
+
+
+def test_a_blank_cluster_beside_one_lineage_takes_that_name():
+    from annotuneagent.workflow import _fill_blank_labels_by_umap
+
+    coords = np.array(
+        [
+            [0.0, 0.0],
+            [0.2, 0.0],
+            [0.4, 0.0],
+            [0.6, 0.0],
+            [8.0, 8.0],
+            [8.2, 8.0],
+        ]
+    )
+    adata = AnnData(
+        X=np.zeros((6, 1)),
+        obs={"leiden": ["0", "0", "1", "1", "2", "2"]},
+    )
+    adata.obsm["X_umap"] = coords
+    blank = {
+        "cluster": "0",
+        "written_label": None,
+        "final_status": "review",
+        "final_reason": "unresolved_evidence",
+        "hint": None,
+    }
+    neutrophil = {
+        "cluster": "1",
+        "written_label": "neutrophil",
+        "final_status": "review",
+        "final_reason": "weak_agreement",
+        "hint": "weak agreement on neutrophil",
+    }
+    far = {
+        "cluster": "2",
+        "written_label": "B cell",
+        "final_status": "named",
+        "final_reason": "evidence_agreement",
+        "hint": None,
+    }
+    resolved = {"1": {"1": "neutrophil"}, "2": {"2": "B cell"}}
+    _fill_blank_labels_by_umap(
+        adata, "leiden", [blank, neutrophil, far], resolved, None, None, None
+    )
+    assert blank["written_label"] == "neutrophil"
+    assert blank["final_reason"] == "near_clear_cluster"
+    assert "near 1 neutrophil" in blank["hint"]
+    assert "umap distance" in blank["hint"]
+    assert resolved["0"] == {"0": "neutrophil"}
+
+    between = np.array(
+        [
+            [0.0, 0.0],
+            [0.2, 0.0],
+            [1.0, 0.0],
+            [1.2, 0.0],
+            [0.45, 0.0],
+            [0.65, 0.0],
+        ]
+    )
+    mixed = AnnData(
+        X=np.zeros((6, 1)),
+        obs={"leiden": ["1", "1", "2", "2", "3", "3"]},
+    )
+    mixed.obsm["X_umap"] = between
+    middle = {
+        "cluster": "3",
+        "written_label": None,
+        "final_status": "review",
+        "final_reason": "unresolved_evidence",
+        "hint": None,
+    }
+    kept = {"1": {"1": "neutrophil"}, "2": {"2": "B cell"}}
+    _fill_blank_labels_by_umap(mixed, "leiden", [middle, neutrophil, far], kept, None, None, None)
+    assert middle["written_label"] == "neutrophil"
+    assert "near 1 neutrophil" in middle["hint"]
+    assert kept["3"] == {"3": "neutrophil"}
+
+    withheld = {
+        "cluster": "1",
+        "written_label": "endothelial cell",
+        "final_status": "out_of_dictionary",
+        "final_reason": "out_of_dictionary",
+        "hint": "unexplained: Emcn",
+    }
+    untouched = {
+        "cluster": "0",
+        "written_label": None,
+        "final_status": "out_of_dictionary",
+        "final_reason": "out_of_dictionary",
+        "hint": "unexplained: Emcn",
+    }
+    blocked: dict = {}
+    _fill_blank_labels_by_umap(
+        adata, "leiden", [untouched, withheld, far], blocked, None, None, None
+    )
+    assert untouched["written_label"] is None
+    assert "0" not in blocked
 
 
 def test_subcluster_sample_keeps_a_rare_group(monkeypatch):

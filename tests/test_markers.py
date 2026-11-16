@@ -222,6 +222,15 @@ def test_new_tissue_types_are_reachable_only_in_their_tissue(species, scope, cel
     assert hypotheses_from_names([cell_type], species, scope)[0].positive
 
 
+def test_limb_schwann_uses_mog_not_plp1_as_the_oligodendrocyte_negative():
+    human = hypotheses_from_names(["Schwann cell"], "human", "limb")[0]
+    mouse = hypotheses_from_names(["Schwann cell"], "mouse", "limb")[0]
+    assert human.negative == ("MOG", "PTPRC")
+    assert mouse.negative == ("Mog", "Ptprc")
+    assert "PLP1" not in human.negative
+    assert "Plp1" not in mouse.negative
+
+
 def test_eosinophil_uses_species_specific_positive_markers():
     human = hypotheses_from_names(["eosinophil"], "human")[0]
     mouse = hypotheses_from_names(["eosinophil"], "mouse")[0]

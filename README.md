@@ -21,7 +21,9 @@ call stays auditable.
 
 One Qwen3.5-4B base (Q6_K GGUF) is shared by two independent LoRA adapters.
 The adapters are not merged into the base, so they load together on a single
-local `llama-server` and can be replaced without touching the base.
+local `llama-server` and can be replaced without touching the base. If that
+server was started with `--api-key`, set `ANNOTUNE_API_KEY`. The same value
+is sent as a bearer token.
 
 | Model | Task it was fine-tuned for | Input | Output |
 | --- | --- | --- | --- |
@@ -108,7 +110,9 @@ filtered counts. `doublet_chip="10k"` (default) uses 0.8% multiplets per
 1,000 recovered cells, and `"20k"` uses 0.4%.
 
 `geo_info("GSE341410")` lists the samples in a GEO series. `read_geo` then
-downloads the ones you name, and `groups` sets the condition in `obs["group"]`.
+downloads the ones you name. `groups` sets `obs["group"]`. Characteristics
+such as day and treatment are stored on `obs`, and `obs={...}` adds columns
+the record does not name.
 [docs/tutorials/gse266598_annotation.ipynb](docs/tutorials/gse266598_annotation.ipynb)
 follows one series from the GEO page through annotation.
 
@@ -160,12 +164,12 @@ The tokenizer is installed with the package. See
 
 ## Status
 
-**0.1.3 (Alpha).** Import as `import annotuneagent as ata`.
+**0.1.4 (Alpha).** Import as `import annotuneagent as ata`.
 
 ## Citation
 
 For the software record, cite the [Zenodo DOI](https://doi.org/10.5281/zenodo.24092828).
-Pin the package version used in the analysis, for example `annotuneagent==0.1.3`.
+Pin the package version used in the analysis, for example `annotuneagent==0.1.4`.
 
 ## License
 

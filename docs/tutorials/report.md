@@ -1,8 +1,7 @@
 # Read the report
 
 `run` returns a dictionary and prints a `Queries` block. Each block is one
-cluster that still has a question: it has no title, or the title is written
-and `hint` is set. AnnoTuneAgent does not send this text to the name model,
+cluster. AnnoTuneAgent does not send this text to the name model,
 the ML model, or any other service. Copy the paragraph under the heading and
 paste it into another model.
 
@@ -71,14 +70,14 @@ title is not a vote count.
 | `name` | First name copied by the name model. `failed` when the call failed. The action when the reply named nothing |
 | `ml` | First name copied by the ML model. `escalate` when it abstains. `failed` when the call failed |
 | `label` | Title written onto the cells. Empty when the cluster stays unnamed |
-| `hint` | The question printed after the title. Empty when there is nothing to ask |
-| `query` | The paragraph to paste. Present when the cluster is unnamed or `hint` is set |
+| `hint` | The question printed after the title. Empty when there is nothing to ask. Weak agreement keeps its title and puts the doubt here. A name outside the dictionary is not written; this hint lists the unexplained genes. Endothelial cell is written instead of pericyte when an endothelial gene is enriched and no pericyte program gene is; the hint is `endothelial cell rather than pericyte` |
+| `query` | The paragraph to paste. Present for every cluster that has a Wilcoxon table |
 | `reason` | Why the title was written or withheld |
 | `ontology` | Cell Ontology id for the written title. `pending` means the id is not a reviewed row |
 
 `adata.obs["annotune_label"]` is the title. `adata.obs["annotune_hint"]` is
 the hint on every cell of that cluster. `adata.obs["annotune_final_status"]`
-is `named`, `review`, or `escalate`. Clusters that share a title also share
+is `named`, `review`, `escalate`, or `out_of_dictionary`. Clusters that share a title also share
 one id in `adata.obs["annotune_cluster"]`. The Leiden column is kept.
 
 ## What to read first
@@ -89,13 +88,15 @@ order, not an accuracy score.
 | Priority | Which clusters |
 |---|---|
 | 0 | No title |
-| 1 | A conflict, or close marker scores |
+| 1 | A conflict, close marker scores, weak agreement, a name outside the dictionary, or endothelial cell rather than pericyte |
 | 2 | A model call failed |
 | 3 | Fewer than 20 cells |
 | 4 | Any other hint |
 
-`report["queue"]` lists only clusters with no title. A titled cluster with a
-hint is in `review`, and on `annotune_hint`, and it is not in `queue`.
+`report["queue"]` lists clusters that still have at least one unlabeled cell.
+A cluster whose cells are all named is not in `queue`, even when that cluster
+has no single title of its own. A titled cluster with a hint is in `review`
+and on `annotune_hint`.
 
 ## The rest of the report
 
@@ -103,7 +104,7 @@ hint is in `review`, and on `annotune_hint`, and it is not in `queue`.
 |---|---|
 | `records` | The working record for each cluster, including model rounds and the marker ranking |
 | `dropped_hypotheses` | Dictionary types left out because none of their positive markers are in the matrix |
-| `subclusters` | The second split of a cluster that was not settled. Empty when `subcluster=False` |
+| `subclusters` | One split of a cluster the marker score did not label, of a cytotoxic mixture whose top panel is not a specific mature NK T cell, and of a cluster whose name and ML calls are different lineages when the children receive more than one title. A split whose cells all have one title is dropped. Empty when `subcluster=False` or nothing was split |
 | `arbitration` | Clusters that were not given the status `named` |
 | `merged` | Titles that were given one `annotune_cluster` id |
 | `all_labeled` | True when every cell has a title |

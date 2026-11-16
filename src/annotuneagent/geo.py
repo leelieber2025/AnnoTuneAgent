@@ -36,6 +36,9 @@ _WORDS = {
     "naive": "naive",
 }
 _GROUP_KEYS = ("treatment", "condition", "group", "time", "timepoint", "stimulus", "disease")
+_DAY_COLUMNS = {"day", "days", "dpi", "time", "timepoint", "time_point"}
+_TREATMENT_COLUMNS = {"treatment", "treatment_group", "stimulus"}
+_RESERVED_OBS = {"sample", "group", "geo_accession"}
 _COUNTS = {"matrix.mtx.gz": "mtx", "matrix.h5": "h5"}
 
 
@@ -105,6 +108,7 @@ def read_geo(
     *,
     samples: Sequence[str] | str | None = None,
     groups: Mapping[str, str] | str | None = None,
+    obs: Mapping[str, Mapping[str, str] | str] | None = None,
     cache: str | Path | None = None,
 ) -> AnnData:
     """Download GEO samples and join their count matrices.
@@ -114,7 +118,12 @@ def read_geo(
     some of them, pass titles or GSM accessions from that record::
 
         info = geo_info("GSE341410")
-        adata = read_geo(info, samples=["B1", "B3"], groups="B1: control B3: Day7")
+        adata = read_geo(
+            info,
+            samples=["B1", "B3"],
+            groups="B1: control B3: Day7",
+            obs={"day": "B1: 0 B3: 7", "treatment": "B1: none B3: C&AIA"},
+        )
 
     ``samples`` may be a list or a string. A comma separates names. One title
     that contains spaces stays whole; several one-word titles can be separated
@@ -123,7 +132,13 @@ def read_geo(
     may be the full GEO title. ``obs["sample"]``
     stays the GEO title. ``obs["group"]`` is your name, or a condition read
     from the record when one differs between samples, or the title otherwise.
-    A file already in the cache is not downloaded again.
+    Each GEO characteristic is also an obs column. A time point is copied to
+    ``obs["day"]``, and a treatment or stimulus to ``obs["treatment"]``. The
+    same words are read from a sample title when the record does not name
+    them. ``obs`` adds or replaces sample-level columns, with the same dict or
+    string syntax as ``groups``. ``sample``, ``group``, and ``geo_accession``
+    are not column names for that argument. A file already in the cache is
+    not downloaded again.
     """
     series, records, meta, root = _open(accession, cache)
     chosen = _select(series, records, samples)
@@ -137,16 +152,33 @@ def read_geo(
             flush=True,
         )
     labels = _apply_groups(chosen, labels, override)
+    extra = _parse_obs(series, obs, records)
     pieces: dict[str, AnnData] = {}
     for item in chosen:
         folder = _materialize(item, root / series)
         piece = _unique(_read_folder(folder))
         piece.obs["geo_accession"] = item.gsm
+        assigned: dict[str, str] = {}
         for key, value in item.chars.items():
             column = _column(key)
-            if column in ("sample", "group", "geo_accession"):
+            if column in _RESERVED_OBS:
                 column = f"geo_{column}"
-            piece.obs[column] = value
+            if column in _DAY_COLUMNS:
+                if column != "day":
+                    _put_obs(piece, assigned, column, value)
+                if "day" not in assigned:
+                    _put_obs(piece, assigned, "day", _day_value(value))
+                continue
+            _put_obs(piece, assigned, column, value)
+            if column in _TREATMENT_COLUMNS and "treatment" not in assigned:
+                _put_obs(piece, assigned, "treatment", value)
+        for name, text in _factors_from_text(item.title).items():
+            if name not in assigned:
+                _put_obs(piece, assigned, name, text)
+        for column, mapping in extra.items():
+            text = _mapped_label(item, mapping)
+            if text is not None:
+                _put_obs(piece, assigned, column, text)
         print(
             f"{item.title}: {piece.shape}  {item.gsm}  group {labels[item.title]}",
             flush=True,
@@ -219,6 +251,79 @@ def _accession(text: str) -> str:
 
 def _column(key: str) -> str:
     return re.sub(r"[^0-9A-Za-z]+", "_", key.strip().lower()).strip("_")
+
+
+def _put_obs(piece: AnnData, assigned: dict[str, str], column: str, value: str) -> None:
+    piece.obs[column] = value
+    assigned[column] = value
+
+
+def _parse_obs(
+    series: str,
+    obs: Mapping[str, Mapping[str, str] | str] | None,
+    records: list[_Sample],
+) -> dict[str, dict[str, str]]:
+    """Column name to sample labels. The syntax is the same as ``groups``."""
+    if obs is None:
+        return {}
+    if isinstance(obs, str) or not isinstance(obs, Mapping):
+        raise TypeError("obs must map a column name to sample labels")
+    parsed: dict[str, dict[str, str]] = {}
+    for key, labels in obs.items():
+        column = _column(str(key))
+        if column in _RESERVED_OBS or not column:
+            raise ValueError(f"obs column {key!r} is reserved; use groups for the condition name")
+        if column in parsed:
+            raise ValueError(f"obs column {column} is repeated")
+        mapping = _parse_groups(labels, records)
+        _check_groups(series, records, mapping, field="obs")
+        parsed[column] = mapping
+    return parsed
+
+
+def _mapped_label(item: _Sample, mapping: Mapping[str, str]) -> str | None:
+    if item.title in mapping:
+        return mapping[item.title]
+    return {key.upper(): value for key, value in mapping.items()}.get(item.gsm.upper())
+
+
+def _day_value(value: str) -> str:
+    text = value.strip()
+    timed = _TIME.fullmatch(text)
+    if timed:
+        return str(int(timed.group(1)))
+    if text.isdigit():
+        return str(int(text))
+    return text
+
+
+def _factors_from_text(text: str) -> dict[str, str]:
+    """Read a day or treatment word from a sample title."""
+    tokens = _split(text)
+    day = None
+    treatment: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        timed = _TIME.fullmatch(token)
+        if timed:
+            day = str(int(timed.group(1)))
+            index += 1
+            continue
+        if token.lower() == "day" and index + 1 < len(tokens) and tokens[index + 1].isdigit():
+            day = str(int(tokens[index + 1]))
+            index += 2
+            continue
+        word = _WORDS.get(token.lower())
+        if word:
+            treatment.append(word)
+        index += 1
+    found: dict[str, str] = {}
+    if day is not None:
+        found["day"] = day
+    if treatment:
+        found["treatment"] = " ".join(dict.fromkeys(treatment))
+    return found
 
 
 def _sample_names(samples: Sequence[str] | str, records: list[_Sample] | None = None) -> list[str]:
@@ -351,13 +456,15 @@ def _key_at(text: str, name: str) -> list[int]:
         start = index + 1
 
 
-def _check_groups(series: str, records: list[_Sample], override: Mapping[str, str]) -> None:
+def _check_groups(
+    series: str, records: list[_Sample], override: Mapping[str, str], *, field: str = "groups"
+) -> None:
     titles = {item.title for item in records}
     gsms = {item.gsm.upper() for item in records}
     unknown = [key for key in override if key not in titles and key.upper() not in gsms]
     if unknown:
         known = ", ".join(item.title for item in records)
-        raise ValueError(f"groups {unknown} are not samples of {series} ({known})")
+        raise ValueError(f"{field} {unknown} are not samples of {series} ({known})")
 
 
 def _apply_groups(

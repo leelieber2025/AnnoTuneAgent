@@ -326,7 +326,8 @@ def test_cli_creates_report_and_h5ad_directories_without_marker_plot(tmp_path: P
     hypotheses = tmp_path / "hypotheses.json"
     report = tmp_path / "reports" / "result.json"
     labeled = tmp_path / "labeled" / "result.h5ad"
-    adata.write_h5ad(src)
+    with ad.settings.override(allow_write_nullable_strings=True):
+        adata.write_h5ad(src)
     hypotheses.write_text(json.dumps([{"name": "type", "positive": ["G1"]}]))
 
     assert (
@@ -444,7 +445,8 @@ def test_cli_local_models_load_only_name_and_ml(tmp_path: Path, monkeypatch):
     out = tmp_path / "out.json"
     labeled = tmp_path / "labeled.h5ad"
     hypotheses = tmp_path / "hypotheses.json"
-    adata.write_h5ad(src)
+    with ad.settings.override(allow_write_nullable_strings=True):
+        adata.write_h5ad(src)
     hypotheses.write_text(json.dumps([{"name": "A cell", "positive": ["A"]}]))
     seen = []
 
@@ -629,11 +631,12 @@ def test_cli_model_path_saves_unresolved_cells(tmp_path: Path, monkeypatch):
 def test_cli_writes_a_marker_name_that_name_and_ml_repeat(tmp_path: Path, monkeypatch):
     from annotuneagent.decide import Decision, MlResult
 
-    x = np.zeros((40, 2))
+    x = np.zeros((40, 3))
     x[:20, 0] = 5
+    x[:20, 2] = 5
     x[20:, 1] = 5
     adata = AnnData(X=x, obs={"leiden": ["0"] * 20 + ["1"] * 20})
-    adata.var_names = ["A", "B"]
+    adata.var_names = ["A", "B", "C"]
     adata.uns["log1p"] = {"base": None}
     src = tmp_path / "in.h5ad"
     out = tmp_path / "out.json"
@@ -641,7 +644,7 @@ def test_cli_writes_a_marker_name_that_name_and_ml_repeat(tmp_path: Path, monkey
     hypotheses = tmp_path / "h.json"
     with ad.settings.override(allow_write_nullable_strings=True):
         adata.write_h5ad(src)
-    hypotheses.write_text(json.dumps([{"name": "A cell", "positive": ["A"]}]))
+    hypotheses.write_text(json.dumps([{"name": "A cell", "positive": ["A", "C"]}]))
     monkeypatch.setattr(
         "annotuneagent.workflow.fetch_name",
         lambda _url, _payload, **_extra: Decision("retest", ("A cell",)),

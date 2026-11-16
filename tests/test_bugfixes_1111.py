@@ -217,6 +217,63 @@ def test_url_requests_enable_the_adapter_by_file_name(monkeypatch, listed, name_
     assert sorted(item["id"] for item in seen["lora"]) == [0, 1]
 
 
+def test_failed_adapter_list_is_not_cached(monkeypatch):
+    calls = {"n": 0}
+
+    def listed(_url, _path):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None
+        return [
+            {"id": 0, "path": "ml.gguf"},
+            {"id": 1, "path": "name.gguf"},
+        ]
+
+    seen = []
+    monkeypatch.setattr(ll, "_get_json", listed)
+    monkeypatch.setattr(ll, "render_prompt", lambda *a, **k: "P")
+    monkeypatch.setattr(ll, "prompt_tokens", lambda *a, **k: 4)
+
+    def post(_url, _path, payload, timeout=None):
+        seen.append([item["id"] for item in payload["lora"] if item["scale"] == 1.0])
+        return {"content": "{}"}
+
+    monkeypatch.setattr(ll, "_post_url", post)
+    ll.complete_url("http://h:8080", "name", "s", "u", maxlen=100)
+    ll.complete_url("http://h:8080", "name", "s", "u", maxlen=100)
+    ll.complete_url("http://h:8080", "name", "s", "u", maxlen=100)
+    assert seen == [[0], [1], [1]]
+    assert calls["n"] == 2
+
+
+def test_unparsed_adapter_list_is_not_cached(monkeypatch):
+    calls = {"n": 0}
+
+    def listed(_url, _path):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return [{"id": 0, "path": "/a.gguf"}, {"id": 1, "path": "/b.gguf"}]
+        return [
+            {"id": 0, "path": "ml.gguf"},
+            {"id": 1, "path": "name.gguf"},
+        ]
+
+    seen = []
+    monkeypatch.setattr(ll, "_get_json", listed)
+    monkeypatch.setattr(ll, "render_prompt", lambda *a, **k: "P")
+    monkeypatch.setattr(ll, "prompt_tokens", lambda *a, **k: 4)
+
+    def post(_url, _path, payload, timeout=None):
+        seen.append([item["id"] for item in payload["lora"] if item["scale"] == 1.0])
+        return {"content": "{}"}
+
+    monkeypatch.setattr(ll, "_post_url", post)
+    ll.complete_url("http://h:8080", "name", "s", "u", maxlen=100)
+    ll.complete_url("http://h:8080", "name", "s", "u", maxlen=100)
+    assert seen == [[0], [1]]
+    assert calls["n"] == 2
+
+
 def test_evaluate_tolerates_clusters_without_a_record():
     adata = _low_detection_adata()
     adata.obs["author"] = ["x"] * adata.n_obs

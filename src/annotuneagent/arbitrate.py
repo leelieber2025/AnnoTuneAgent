@@ -112,6 +112,17 @@ def program_specific(genes: tuple[GeneEvidence, ...] | list[GeneEvidence]) -> bo
     return _panel_count(genes, specific=True)
 
 
+def panel_presence(genes: tuple[GeneEvidence, ...] | list[GeneEvidence]) -> float:
+    """Mean fraction of cluster cells that express the positive markers.
+
+    A gene absent from the matrix is stored with ``pct_in`` 0 and stays in
+    the mean. This is not enrichment, and it does not choose the name.
+    """
+    if not genes:
+        return 0.0
+    return sum(float(gene.pct_in) for gene in genes) / len(genes)
+
+
 def _panel_count(genes: tuple[GeneEvidence, ...] | list[GeneEvidence], *, specific: bool) -> bool:
     if len(genes) < 2:
         return False
@@ -179,6 +190,8 @@ def arbitrate(
                 "score": item.score,
                 "program_on": program_detected(item.positive),
                 "program_specific": program_specific(item.positive),
+                "presence": panel_presence(item.positive),
+                "n_positive": len(item.positive),
                 "eligible": item.eligible,
                 "lead_genes": [
                     gene.gene for gene in item.positive if gene.pct_in >= 0.25 and gene.logfc >= 1.0

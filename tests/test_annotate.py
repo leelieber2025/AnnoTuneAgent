@@ -358,6 +358,44 @@ def test_program_specific_ignores_genes_that_are_common_outside():
     assert program_specific([gene(0.9, 0.02, 6.0), gene(0.2, 0.02, 6.0)]) is False
 
 
+def test_presence_is_recorded_and_does_not_choose_the_name():
+    from annotuneagent.arbitrate import arbitrate, panel_presence, score_hypothesis
+    from annotuneagent.evidence import GeneEvidence
+
+    def gene(name: str, pct_in: float, pct_out: float, logfc: float) -> GeneEvidence:
+        return GeneEvidence(
+            gene=name,
+            direction="positive",
+            pct_in=pct_in,
+            pct_out=pct_out,
+            mean_in=1.0,
+            mean_out=0.1,
+            logfc=logfc,
+            pvalue=0.01,
+            expressed=pct_in >= 0.25,
+        )
+
+    endothelial = Hypothesis("endothelial cell", positive=("PECAM1", "VWF"))
+    b_cell = Hypothesis("B cell", positive=("MS4A1", "CD79A"))
+    endothelial_genes = [gene("PECAM1", 0.95, 0.90, 0.05), gene("VWF", 0.90, 0.85, 0.04)]
+    b_genes = [gene("MS4A1", 0.70, 0.02, 3.0), gene("CD79A", 0.60, 0.02, 3.0)]
+    record = arbitrate(
+        "0",
+        [
+            score_hypothesis(endothelial, endothelial_genes, []),
+            score_hypothesis(b_cell, b_genes, []),
+        ],
+    )
+    by_name = {row["name"]: row for row in record["ranking"]}
+    assert by_name["endothelial cell"]["presence"] == pytest.approx(
+        panel_presence(endothelial_genes)
+    )
+    assert by_name["endothelial cell"]["presence"] > by_name["B cell"]["presence"]
+    assert by_name["endothelial cell"]["program_specific"] is False
+    assert by_name["B cell"]["program_specific"] is True
+    assert record["cell_type"] == "B cell"
+
+
 def test_negative_marker_blocks_label():
     adata = _adata()
     adata.X[20:, 2] = 0
@@ -401,6 +439,29 @@ def test_absent_negative_does_not_change_the_label():
     ]
     evidence = next(row for row in extra if row["cluster"] == "0")["evidence"]["negative"]
     assert [gene["gene"] for gene in evidence] == ["CD8A"]
+
+
+def test_support_gene_absent_from_the_matrix_is_skipped():
+    base = annotate(
+        _adata(),
+        "leiden",
+        [Hypothesis("CD4 T", positive=("CD3E", "CD4"), negative=("CD8A",))],
+    )
+    extra = annotate(
+        _adata(),
+        "leiden",
+        [
+            Hypothesis(
+                "CD4 T",
+                positive=("CD3E", "CD4"),
+                negative=("CD8A",),
+                support=("MISSING",),
+            )
+        ],
+    )
+    assert [(row["cluster"], row["cell_type"], row["status"]) for row in extra] == [
+        (row["cluster"], row["cell_type"], row["status"]) for row in base
+    ]
 
 
 def test_gene_absent_from_the_matrix_scores_zero():

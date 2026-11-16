@@ -93,6 +93,11 @@ def evaluate(
     ``parents`` maps a label to the coarser label that still counts as a match.
     Sibling types that share a parent do not match each other. When a workflow
     wrote cell labels, ``prediction_key`` evaluates those final labels.
+    A workflow record has ``final_status``. Without ``prediction_key``, the
+    score uses ``written_label``, the title that was written, instead of the
+    marker ``status``. A record with no written title is uncertain, including
+    a cytotoxic mixture that was not written. ``prediction_key`` still scores
+    the labels on the cells, including a cluster that was split.
     ``raw_label_key`` is the author string before alias mapping. With it, a
     mapped name is the reference only when it wins among all author-labeled
     cells. An unmapped raw majority is not replaced by a mapped minority.
@@ -120,6 +125,9 @@ def evaluate(
         record = by_cluster.get(cluster, {"status": "uncertain", "cell_type": None})
         status = str(record["status"])
         predicted = record["cell_type"]
+        if "final_status" in record and prediction_key is None:
+            predicted = record.get("written_label")
+            status = "label" if predicted else "uncertain"
         if prediction_key is not None:
             labels = adata.obs.loc[groups == cluster, prediction_key]
             names = labels.dropna().astype(str).unique()

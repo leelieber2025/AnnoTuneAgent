@@ -92,6 +92,7 @@ def annotate(
             support = [
                 evidence_from_stats(gene, "positive", cluster_stats[gene])
                 for gene in hypothesis.support
+                if gene in cluster_stats
             ]
             required = None
             if hypothesis.requires_any:

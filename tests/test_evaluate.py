@@ -106,6 +106,40 @@ def test_unknown_dictionary_name():
         raise AssertionError("expected KeyError")
 
 
+def test_workflow_record_is_scored_by_the_written_label():
+    adata = _labeled()
+    records = [
+        {
+            "cluster": "0",
+            "status": "label",
+            "cell_type": "CD4-positive, alpha-beta T cell",
+            "final_status": "review",
+            "final_reason": "cytotoxic_mixture",
+            "written_label": None,
+        },
+        {
+            "cluster": "1",
+            "status": "uncertain",
+            "cell_type": None,
+            "final_status": "named",
+            "written_label": "CD8-positive, alpha-beta T cell",
+        },
+    ]
+    summary = evaluate(records, adata, "leiden", "author")
+    by_cluster = {row["cluster"]: row for row in summary["clusters"]}
+    assert by_cluster["0"]["status"] == "uncertain"
+    assert by_cluster["0"]["predicted"] is None
+    assert by_cluster["0"]["exact"] is False
+    assert by_cluster["1"]["status"] == "label"
+    assert by_cluster["1"]["exact"] is True
+    assert summary["n_exact"] == 1
+    assert summary["n_label"] == 1
+    assert summary["n_uncertain"] == 1
+    adata.obs["annotune_label"] = adata.obs["author"].copy()
+    written = evaluate(records, adata, "leiden", "author", prediction_key="annotune_label")
+    assert written["n_exact"] == 2
+
+
 def test_workflow_evaluation_uses_written_labels():
     adata = _labeled()
     records = annotate(

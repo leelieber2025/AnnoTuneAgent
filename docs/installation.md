@@ -11,7 +11,7 @@ import annotuneagent as ata
 print(ata.__version__)
 ```
 
-The version is set in `src/annotuneagent/_version.py` (currently **0.1.3**).
+The version is set in `src/annotuneagent/_version.py` (currently **0.1.4**).
 
 From a checkout:
 
@@ -45,7 +45,8 @@ The GGUF weights are not in the Python package. Download them from the
 Hugging Face Hub:
 [lieberlee/annotune-qwen3.5-4b-gguf](https://huggingface.co/lieberlee/annotune-qwen3.5-4b-gguf).
 {doc}`tutorials/load_model` shows the download and passes the folder to
-`local_models(root)`.
+`local_models(root)`. If the server was started with `--api-key`, set
+`ANNOTUNE_API_KEY` to the same value. It is sent as a bearer token.
 
 The package includes the Qwen tokenizer files, the Cell Ontology snapshot, and
 the reviewed name map. The tokenizer files come from `Qwen/Qwen3.5-4B`

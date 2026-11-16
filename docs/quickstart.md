@@ -32,11 +32,19 @@ To start from a GEO series, `ata.geo_info` reads the series record and lists
 each sample title, accession, and characteristics. It does not download
 counts. Print that result, choose the samples, and pass the names you want
 to `ata.read_geo`. `obs["sample"]` stays the GEO title. `obs["group"]` is the
-name you pass. Use either column as `batch_key`.
+name you pass. Each characteristic in the GEO record becomes an obs column.
+A time point is also stored in `obs["day"]`, and a treatment or stimulus in
+`obs["treatment"]`. `obs` adds or replaces those columns when the record does
+not name them. Use `sample` or `group` as `batch_key`.
 
 ```python
 info = ata.geo_info("GSE341410")
-adata = ata.read_geo(info, samples=["B1", "B3"], groups="B1: control B3: Day7")
+adata = ata.read_geo(
+    info,
+    samples=["B1", "B3"],
+    groups="B1: control B3: Day7",
+    obs={"day": "B1: 0 B3: 7", "treatment": "B1: none B3: C&AIA"},
+)
 adata = ata.prepare(adata, species="mouse", batch_key="sample")
 ```
 
@@ -51,7 +59,9 @@ The call above collects the marker score only. To also run the name and ML
 models, download the weights from the Hub
 ([lieberlee/annotune-qwen3.5-4b-gguf](https://huggingface.co/lieberlee/annotune-qwen3.5-4b-gguf))
 and pass them to `run`. {doc}`tutorials/load_model` covers the download, the
-`llama-server` install, and remote servers.
+`llama-server` install, and remote servers. If that server was started with
+`--api-key`, set `ANNOTUNE_API_KEY` to the same value. It is sent as a bearer
+token.
 
 ```python
 models = ata.local_models("/path/to/annotune-models")
@@ -196,8 +206,10 @@ panel, not to each gene separately.
 ### Report fields
 
 - `dropped_hypotheses`: each dictionary type left out because none of its
-  positive markers are in the matrix. One missing positive gene is omitted
-  and the type stays.
+  positive markers are in the matrix. One missing positive gene stays in the
+  panel and scores 0, and the type stays. A missing support gene is omitted.
+  A missing negative gene stays on the panel, is not scored, and is counted
+  as unmeasured for the ML call.
 - `review`: clusters that still need a look. The order is not an accuracy
   score.
 - `annotation_code`: an editable cluster mapping, `fine_order`, a `marker_dict`,
@@ -250,8 +262,14 @@ same way when it has the `batch_key` column.
 ## How a cluster gets its name
 
 A judgment reads the marker score, the name-model result, and the ML-model
-result, and writes the title. Doubt is recorded in `annotune_hint` and in
-`final_reason` on the record. The title is still written.
+result. It writes a dictionary name, or it leaves the cluster unnamed and
+records why. A hint, when there is one, is stored on `annotune_hint`. The
+record's `final_reason` says why the title was written or withheld.
+
+- `cytotoxic_mixture`: the NK panel and the T panel are both specific. The
+  cluster stays unnamed so it can be split. A top-ranked `mature NK T cell`
+  whose own panel is specific is written as that type. Labels from the split
+  are written only when every child cluster has a label.
 
 - `no_marker_passed`: none of the name's cited markers passed the expression
   check. The name stays, the hint reads `no marker passed`, and the dotplot
@@ -269,5 +287,7 @@ result, and writes the title. Doubt is recorded in `annotune_hint` and in
   the same lineage stays, and the hint names the neighboring cluster. A cluster
   that touches two lineages is not renamed.
 
-`report["queue"]` lists only clusters with no written title. To find titled
-clusters that still carry a question, filter on `annotune_hint`.
+`report["queue"]` lists clusters that still have at least one cell without a
+title. A cluster whose cells are all named, including by a subcluster split,
+is not in `queue`. To find a titled cluster that still carries a question,
+filter on `annotune_hint`.

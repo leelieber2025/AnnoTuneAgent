@@ -153,7 +153,9 @@ def _adapter_ids(url: str) -> dict[str, int]:
     ``/lora-adapters`` lists each adapter's file. When exactly one file name
     has the token ``name`` and exactly one has ``ml``, those ids are used, so
     a server loaded with ``--lora ml.gguf,name.gguf`` is not called with the
-    adapters swapped. Otherwise the load order is assumed.
+    adapters swapped. Otherwise this request uses the load order, name 0 and
+    ml 1. Only a successful parse is cached. A failed read, or a list that
+    does not name both adapters, is asked again on the next request.
     """
     url = _base_url(url)
     cached = _ADAPTER_IDS.get(url)
@@ -161,23 +163,26 @@ def _adapter_ids(url: str) -> dict[str, int]:
         return cached
     ids = {name: index for index, name in enumerate(_TASKS)}
     listed = _get_json(url, "/lora-adapters")
-    if isinstance(listed, list):
-        found: dict[str, list[int]] = {}
-        for item in listed:
-            if not isinstance(item, dict) or "id" not in item:
-                continue
-            try:
-                index = int(item["id"])
-            except (TypeError, ValueError):
-                continue
-            filename = re.split(r"[\\/]", str(item.get("path") or ""))[-1].lower()
-            tokens = set(re.split(r"[^a-z0-9]+", filename))
-            for task in _TASKS:
-                if task in tokens:
-                    found.setdefault(task, []).append(index)
-        if all(len(found.get(task, [])) == 1 for task in _TASKS):
-            if found["name"][0] != found["ml"][0]:
-                ids = {task: found[task][0] for task in _TASKS}
+    if not isinstance(listed, list):
+        return ids
+    found: dict[str, list[int]] = {}
+    for item in listed:
+        if not isinstance(item, dict) or "id" not in item:
+            continue
+        try:
+            index = int(item["id"])
+        except (TypeError, ValueError):
+            continue
+        filename = re.split(r"[\\/]", str(item.get("path") or ""))[-1].lower()
+        tokens = set(re.split(r"[^a-z0-9]+", filename))
+        for task in _TASKS:
+            if task in tokens:
+                found.setdefault(task, []).append(index)
+    if not all(len(found.get(task, [])) == 1 for task in _TASKS):
+        return ids
+    if found["name"][0] == found["ml"][0]:
+        return ids
+    ids = {task: found[task][0] for task in _TASKS}
     _ADAPTER_IDS[url] = ids
     return ids
 

@@ -236,3 +236,70 @@ def test_group_text_with_spaces_is_kept(tmp_path, monkeypatch):
     _cache_matrices(tmp_path, "GSM1", "GSM2")
     adata = read_geo("GSE1", groups="B1: control group B2: Day 7", cache=tmp_path)
     assert adata.uns["geo"]["groups"] == {"B1": "control group", "B2": "Day 7"}
+
+
+def test_day_and_treatment_from_the_record_are_obs_columns(tmp_path, monkeypatch):
+    text = _soft(
+        {
+            "gsm": "GSM1",
+            "title": "S1",
+            "chars": {"timepoint": "D0", "stimulus": "vehicle", "strain": "C57BL/6"},
+        },
+        {
+            "gsm": "GSM2",
+            "title": "S2",
+            "chars": {"timepoint": "D7", "stimulus": "treated", "strain": "C57BL/6"},
+        },
+    )
+    _patch(monkeypatch, text)
+    _cache_matrices(tmp_path, "GSM1", "GSM2")
+    adata = read_geo("GSE1", cache=tmp_path)
+    by_sample = {
+        sample: adata.obs.loc[adata.obs["sample"].astype(str) == sample].iloc[0]
+        for sample in ("S1", "S2")
+    }
+    assert by_sample["S1"]["day"] == "0"
+    assert by_sample["S2"]["day"] == "7"
+    assert by_sample["S1"]["timepoint"] == "D0"
+    assert by_sample["S1"]["treatment"] == "vehicle"
+    assert by_sample["S2"]["treatment"] == "treated"
+    assert set(adata.obs["strain"].astype(str)) == {"C57BL/6"}
+
+
+def test_day_and_treatment_are_read_from_the_title(tmp_path, monkeypatch):
+    _patch(
+        monkeypatch,
+        _soft({"gsm": "GSM1", "title": "Ctrl"}, {"gsm": "GSM2", "title": "day 7 treated"}),
+    )
+    _cache_matrices(tmp_path, "GSM1", "GSM2")
+    adata = read_geo("GSE1", cache=tmp_path)
+    ctrl = adata.obs.loc[adata.obs["sample"].astype(str) == "Ctrl"].iloc[0]
+    later = adata.obs.loc[adata.obs["sample"].astype(str) == "day 7 treated"].iloc[0]
+    assert ctrl["treatment"] == "control"
+    assert str(ctrl["day"]) == "nan"
+    assert later["day"] == "7"
+    assert later["treatment"] == "treated"
+
+
+def test_obs_argument_adds_and_replaces_sample_columns(tmp_path, monkeypatch):
+    text = _soft(
+        {"gsm": "GSM1", "title": "B1", "chars": {"treatment": "C&AIA"}},
+        {"gsm": "GSM2", "title": "B2", "chars": {"treatment": "C&AIA"}},
+    )
+    _patch(monkeypatch, text)
+    _cache_matrices(tmp_path, "GSM1", "GSM2")
+    adata = read_geo(
+        "GSE1",
+        obs={"day": "B1: 0 B2: 7", "treatment": {"GSM1": "none", "B2": "C&AIA"}},
+        cache=tmp_path,
+    )
+    first = adata.obs.loc[adata.obs["sample"].astype(str) == "B1"].iloc[0]
+    second = adata.obs.loc[adata.obs["sample"].astype(str) == "B2"].iloc[0]
+    assert first["day"] == "0"
+    assert second["day"] == "7"
+    assert first["treatment"] == "none"
+    assert second["treatment"] == "C&AIA"
+    with pytest.raises(ValueError, match="reserved"):
+        read_geo("GSE1", obs={"group": "B1: control"}, cache=tmp_path)
+    with pytest.raises(ValueError, match="obs"):
+        read_geo("GSE1", obs={"day": "Z9: 1"}, cache=tmp_path)
