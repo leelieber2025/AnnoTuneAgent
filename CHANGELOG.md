@@ -2,6 +2,51 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.1.5] - 2026-11-17
+
+### Changed
+
+- Mitochondrial QC uses 3 median absolute deviations on the upper side of
+  log1p(percent), fit inside each sample. A cell is removed only when its
+  mitochondrial share also exceeds 8%. `max_pct_mt` is still an optional
+  hard cap.
+- A title that the name model and the ML model already agree on stays written
+  when its cited markers fail the expression check. A different marker call
+  does not replace it, unless that marker program is specific and the agreed
+  program is not on. Otherwise the hint stays `no marker passed`.
+- The cluster query lists up to 20 enriched genes. It listed 10.
+- A cluster is removed only when it has no title of its own and at least
+  half of its 20 leading enriched genes are ribosomal proteins
+  detected in at least 70% of the other cells. A missing title alone does
+  not remove it. A cluster that already has a title stays. The hint is
+  `ribosomal genes only`.
+- `prepare` with `show=True` no longer draws the highly variable gene plot
+  or the two scatters of total counts against gene count and mitochondrial
+  percent.
+- `run` no longer draws a UMAP colored by `annotune_cluster`. The merged ids
+  stay in `obs["annotune_cluster"]`. The label UMAP is unchanged.
+- `annotation_code` includes `drop_clusters`. The list starts empty. Cluster
+  ids placed there are removed before the labels and plots. An empty Leiden
+  category left by that removal is dropped. A cell type with no remaining
+  cells is left out of the UMAP legend and the dotplot.
+- A cluster whose cells were removed is not split afterwards.
+- A split prints one Queries block for each remaining child, and adds that
+  child to `report["clusters"]`. The paragraph gives the marker judgment and
+  the genes enriched against the other cells.
+- A cluster whose name and ML calls are endothelial cell and pericyte is
+  split even when a child stays unlabeled. A labeled child names every
+  cell in that child. Children of a lineage split are scored against every
+  other cell. When pericyte and smooth muscle cell are both specific, neither
+  name is written. The hint is `pericyte or smooth muscle cell`. When only
+  one of those programs is specific, that name is written.
+- Subclustering a cluster of fewer than 200 cells tries resolutions 0.1
+  and 0.2. A cluster of 200 to 499 cells tries 0.2 and 0.4. Larger
+  clusters still try 0.6, 1.0, and 1.4. Silhouette chooses. On 141 cells,
+  0.2 keeps two groups.
+- A split between two names keeps at most two child clusters. Resolutions
+  that make more groups are skipped, and 0.05 and 0.1 are tried first.
+  Every cell in a labeled child takes that child's name.
+
 ## [0.1.4] - 2026-11-16
 
 ### Fixed

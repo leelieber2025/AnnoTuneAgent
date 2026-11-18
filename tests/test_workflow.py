@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 from anndata import AnnData
 from scipy import sparse
@@ -57,6 +58,8 @@ def test_stale_subcluster_column_is_ignored(tmp_path):
     assert "'1': 'TypeY'" in report["annotation_code"]
     assert "'2': 'TypeZ'" in report["annotation_code"]
     assert "assert 'leiden' in adata.obs" in report["annotation_code"]
+    assert "drop_clusters = []" in report["annotation_code"]
+    assert "adata.obs['leiden']" in report["annotation_code"]
 
 
 def test_duplicate_gene_names_are_rejected():
@@ -69,6 +72,32 @@ def test_duplicate_gene_names_are_rejected():
         assert "not unique" in str(exc)
     else:
         raise AssertionError("duplicate var_names were accepted")
+
+
+def test_query_lists_twenty_enriched_genes():
+    from annotuneagent.workflow import _cluster_query
+
+    genes = [f"G{i}" for i in range(25)]
+    x = np.zeros((40, 25), dtype=float)
+    x[:20] = 3
+    adata = AnnData(X=x, obs={"leiden": ["0"] * 20 + ["1"] * 20})
+    adata.var_names = genes
+    inside = pd.DataFrame({"0": np.full(25, 0.9), "1": np.full(25, 0.1)}, index=genes)
+    outside = pd.DataFrame({"0": np.full(25, 0.2), "1": np.full(25, 0.4)}, index=genes)
+    adata.uns["rank_genes_groups"] = {
+        "params": {"groupby": "leiden"},
+        "names": {"0": np.array(genes)},
+        "logfoldchanges": {"0": np.array([float(25 - i) for i in range(25)])},
+        "pts": inside,
+        "pts_rest": outside,
+    }
+    text = _cluster_query(
+        adata, "0", species="mouse", tissue="bone", cells=20, programs=[], by_name={}
+    )
+    line = next(line for line in text.splitlines() if line.startswith("Enriched"))
+    body = line.removeprefix("Enriched versus other cells: ").removesuffix(".")
+    listed = [part.split(" ", 1)[0] for part in body.split("; ")]
+    assert listed == genes[:20]
 
 
 def test_query_ignores_a_rank_table_from_another_grouping():
@@ -412,6 +441,12 @@ def test_mixed_cluster_is_not_written_and_can_split(tmp_path, monkeypatch):
     split = next(item for item in report["subclusters"] if item["parent"] == "1")
     child_status = {row["status"] for row in split["records"]}
     assert "label" in child_status
+    child_rows = [row for row in report["clusters"] if str(row["cluster"]).startswith("1.")]
+    assert len(child_rows) == 2
+    for row in child_rows:
+        assert row["query"]
+        assert row["query"].splitlines()[1].startswith("Judgment:")
+        assert "Enriched versus other cells:" in row["query"]
     assert "annotune_sub" in adata.obs.columns
     code = report["annotation_code"]
     for unit in adata.obs["annotune_sub"].iloc[40:].unique():
@@ -616,6 +651,82 @@ def test_ineligible_marker_score_does_not_win():
         marker_labeled=False,
     )
     assert blocked["written_label"] is None
+
+
+def test_agreed_fibroblast_is_not_replaced_by_smooth_muscle():
+    from annotuneagent.workflow import _flag_labels_without_markers, _lineage_resources
+
+    dag, label_map, _known = _lineage_resources("mouse")
+    record = {
+        "cluster": "8",
+        "status": "label",
+        "cell_type": "smooth muscle cell",
+        "written_label": "fibroblast",
+        "final_status": "named",
+        "final_reason": "evidence_agreement",
+        "hint": None,
+        "rounds": [
+            {"step": "name", "names": ["fibroblast"]},
+            {"step": "ml", "names": ["fibroblast"]},
+        ],
+    }
+    resolved = {"8": {"8": "fibroblast"}}
+    status = {
+        "fibroblast": "no_marker_passed_expression_check",
+        "smooth muscle cell": "selected",
+    }
+    changed = _flag_labels_without_markers(
+        [record],
+        resolved,
+        status,
+        {},
+        species="mouse",
+        dag=dag,
+        label_map=label_map,
+    )
+    assert changed is False
+    assert record["written_label"] == "fibroblast"
+    assert resolved["8"] == {"8": "fibroblast"}
+    assert record["final_reason"] == "no_marker_passed"
+    assert record["hint"] == "no marker passed"
+
+
+def test_agreed_name_yields_when_its_program_is_off():
+    from annotuneagent.workflow import _flag_labels_without_markers, _lineage_resources
+
+    dag, label_map, _known = _lineage_resources("mouse")
+    record = {
+        "cluster": "0",
+        "status": "label",
+        "cell_type": "sensory neuron",
+        "written_label": "NK cell",
+        "final_status": "named",
+        "final_reason": "evidence_conflict",
+        "hint": "conflict: marker sensory neuron",
+        "rounds": [
+            {"step": "name", "names": ["NK cell"]},
+            {"step": "ml", "names": ["NK cell"]},
+        ],
+        "ranking": [
+            {"name": "sensory neuron", "program_on": True, "program_specific": True},
+            {"name": "NK cell", "program_on": False, "program_specific": False},
+        ],
+    }
+    resolved = {"0": {"0": "NK cell"}}
+    changed = _flag_labels_without_markers(
+        [record],
+        resolved,
+        {"NK cell": "no_marker_passed_expression_check"},
+        {},
+        species="mouse",
+        dag=dag,
+        label_map=label_map,
+    )
+    assert changed
+    assert record["written_label"] == "sensory neuron"
+    assert resolved["0"] == {"0": "sensory neuron"}
+    assert record["final_reason"] == "marker_rule"
+    assert record["hint"] is None
 
 
 def test_checked_marker_still_replaces_a_failed_name():
@@ -950,7 +1061,7 @@ def test_endothelial_is_written_when_pericyte_genes_are_absent():
     assert plain["written_label"] is None
 
 
-def _force_half_split(part):
+def _force_half_split(part, **_kwargs):
     n = part.n_obs
     part.obs[wf.SUBCLUSTER_KEY] = np.array(["0"] * (n // 2) + ["1"] * (n - n // 2))
     return True
@@ -993,7 +1104,7 @@ def test_a_uniform_split_is_collapsed(monkeypatch):
 
 
 def test_a_named_cluster_is_split_when_name_and_ml_differ(monkeypatch):
-    def force(part):
+    def force(part, **_kwargs):
         n = part.n_obs
         part.obs[wf.SUBCLUSTER_KEY] = np.array(["0"] * 70 + ["1"] * (n - 70))
         return True
@@ -1032,6 +1143,198 @@ def test_a_named_cluster_is_split_when_name_and_ml_differ(monkeypatch):
     assert any(item["parent"] == "0" for item in report["subclusters"])
     assert "'0.0'" in report["annotation_code"]
     assert "'0.1'" in report["annotation_code"]
+
+
+def test_endothelial_pericyte_split_leaves_double_positive_cells_unlabeled(monkeypatch):
+    def force(part, **_kwargs):
+        part.obs[wf.SUBCLUSTER_KEY] = np.array(["0"] * 55 + ["1"] * (part.n_obs - 55))
+        return True
+
+    def fake_annotate(
+        adata, cluster_key, hypotheses, min_margin, ranker, conformal_q, clusters=None
+    ):
+        if cluster_key == wf._SPLIT_SCORE_KEY:
+            names = {"split:0": "endothelial cell", "split:1": "pericyte"}
+            ids = list(clusters) if clusters is not None else list(names)
+            return [_child(str(item), names[str(item)]) for item in ids]
+        if cluster_key == wf.SUBCLUSTER_KEY:
+            return [
+                _child("0", "endothelial cell"),
+                _child("1", "pericyte"),
+            ]
+        rows = []
+        for cluster in adata.obs[cluster_key].astype(str).unique():
+            if clusters is not None and str(cluster) not in {str(item) for item in clusters}:
+                continue
+            name = "endothelial cell" if str(cluster) == "0" else "B cell"
+            rows.append(_child(str(cluster), name))
+        return rows
+
+    monkeypatch.setattr(wf, "_subcluster", force)
+    monkeypatch.setattr(wf, "_annotate", fake_annotate)
+    genes = ["Cdh5", "Cldn5", "Kdr", "Rgs5", "Pdgfrb"]
+    x = np.zeros((110, len(genes)), dtype=float)
+    x[:55, 0:3] = 5
+    x[40:55, 3:5] = 5
+    x[55:90, 3:5] = 5
+    adata = AnnData(X=x, obs={"leiden": ["0"] * 90 + ["1"] * 20})
+    adata.var_names = genes
+    adata.uns["log1p"] = {"base": None}
+    report = run(
+        adata,
+        "leiden",
+        species="mouse",
+        hypotheses=hypotheses_from_names(["endothelial cell", "pericyte", "B cell"], "mouse"),
+        models=_chain(
+            lambda _payload: Decision("retest", ("endothelial cell",)),
+            lambda _payload: MlResult("named", ("pericyte",)),
+        ),
+        model_clusters=["0"],
+        min_subcluster_cells=40,
+    )
+    labels = adata.obs["annotune_label"]
+    assert list(labels.iloc[:55].astype(str).unique()) == ["endothelial cell"]
+    assert list(labels.iloc[55:90].astype(str).unique()) == ["pericyte"]
+    assert int(labels.iloc[:90].isna().sum()) == 0
+    parent = next(row for row in report["records"] if row["cluster"] == "0")
+    assert parent["written_label"] is None
+    assert parent["final_reason"] == "subcluster_labels"
+    assert parent["hint"] is None
+    sub = adata.obs["annotune_sub"].astype(str)
+    assert set(sub.iloc[:55]) == {"0.0"}
+    assert set(sub.iloc[55:90]) == {"0.1"}
+    assert sub.iloc[:90].nunique() == 2
+    assert "doublet" not in report["annotation_code"]
+
+
+def _program(row: dict, name: str) -> bool:
+    return any(
+        item.get("name") == name and item.get("program_specific") is True
+        for item in row.get("ranking") or []
+    )
+
+
+def test_one_specific_mural_program_keeps_its_name():
+    row = _child("1", "smooth muscle cell")
+    row["ranking"].append(
+        {"name": "pericyte", "score": 0.2, "program_on": True, "program_specific": False}
+    )
+    assert wf._withhold_shared_mural(row) is False
+    assert row["cell_type"] == "smooth muscle cell"
+
+
+def test_mural_child_stays_unlabeled_when_both_programs_are_specific(monkeypatch):
+    def force(part, **_kwargs):
+        part.obs[wf.SUBCLUSTER_KEY] = np.array(["0"] * 40 + ["1"] * (part.n_obs - 40))
+        return True
+
+    monkeypatch.setattr(wf, "_subcluster", force)
+    genes = [
+        "Pecam1",
+        "Cdh5",
+        "Kdr",
+        "Cldn5",
+        "Flt1",
+        "Rgs5",
+        "Pdgfrb",
+        "Kcnj8",
+        "Abcc9",
+        "Higd1b",
+        "Acta2",
+        "Myh11",
+        "Cnn1",
+        "Des",
+        "Tagln",
+    ]
+    x = np.zeros((320, len(genes)), dtype=float)
+    x[:40, 5:10] = 2
+    x[:40, [10, 11, 13, 14]] = 2
+    x[40:80, 0:5] = 2
+    # Eleven endothelial cells also express three pericyte genes. Inside the
+    # parent that makes those genes look nonspecific. Against the other cells
+    # they stay specific.
+    x[69:80, 5:8] = 2
+    x[80:160, 10] = 2
+    adata = AnnData(X=x, obs={"leiden": ["0"] * 80 + ["1"] * 240})
+    adata.var_names = genes
+    adata.uns["log1p"] = {"base": None}
+    hyps = hypotheses_from_names(["endothelial cell", "pericyte", "smooth muscle cell"], "mouse")
+    part = adata[:80].copy()
+    part.obs[wf.SUBCLUSTER_KEY] = np.array(["0"] * 40 + ["1"] * 40)
+    sibling = {
+        row["cluster"]: row for row in wf._annotate(part, wf.SUBCLUSTER_KEY, hyps, 0.15, None, None)
+    }
+    assert _program(sibling["0"], "pericyte") is False
+    assert _program(sibling["0"], "smooth muscle cell") is True
+    report = run(
+        adata,
+        "leiden",
+        species="mouse",
+        hypotheses=hyps,
+        models=_chain(
+            lambda _payload: Decision("retest", ("endothelial cell",)),
+            lambda _payload: MlResult("named", ("pericyte",)),
+        ),
+        model_clusters=["0"],
+        min_subcluster_cells=40,
+    )
+    labels = adata.obs["annotune_label"]
+    assert int(labels.iloc[:40].isna().sum()) == 40
+    assert set(labels.iloc[40:80].dropna().astype(str)) == {"endothelial cell"}
+    parent = next(row for row in report["records"] if row["cluster"] == "0")
+    assert parent["written_label"] is None
+    assert parent["hint"] == "pericyte or smooth muscle cell"
+    assert parent["final_reason"] == "subcluster_labels"
+    children = next(item["records"] for item in report["subclusters"] if item["parent"] == "0")
+    mural = next(row for row in children if row["cluster"] == "0.0")
+    assert mural["cell_type"] is None
+    assert mural["hint"] == "pericyte or smooth muscle cell"
+    assert _program(mural, "pericyte") is True
+    assert _program(mural, "smooth muscle cell") is True
+    endo = next(row for row in children if row["cluster"] == "0.1")
+    assert endo["cell_type"] == "endothelial cell"
+    assert wf._SPLIT_SCORE_KEY not in adata.obs.columns
+    assert set(adata.obs["annotune_sub"].iloc[:40].astype(str)) == {"0.0"}
+    assert set(adata.obs["annotune_sub"].iloc[40:80].astype(str)) == {"0.1"}
+    choices = report["annotation_code"].split("# unresolved clusters", 1)[1]
+    line = next(item for item in choices.splitlines() if "'0.0':" in item)
+    assert "pericyte" in line and "smooth muscle cell" in line
+    by_cluster = {row["cluster"]: row for row in report["clusters"]}
+    mural_row = by_cluster["0.0"]
+    endo_row = by_cluster["0.1"]
+    assert mural_row["label"] is None
+    assert mural_row["hint"] == "pericyte or smooth muscle cell"
+    assert "Judgment:" in mural_row["query"]
+    assert "No single name" in mural_row["query"]
+    assert "pericyte specific" in mural_row["query"]
+    assert "smooth muscle cell specific" in mural_row["query"]
+    assert "Enriched versus other cells:" in mural_row["query"]
+    assert "Rgs5" in mural_row["query"]
+    assert endo_row["label"] == "endothelial cell"
+    assert "Judgment: endothelial cell" in endo_row["query"]
+    assert "Enriched versus other cells:" in endo_row["query"]
+    assert "Cdh5" in endo_row["query"]
+
+
+def _child(cluster: str, name: str | None) -> dict:
+    labeled = name is not None
+    return {
+        "cluster": cluster,
+        "status": "label" if labeled else "uncertain",
+        "cell_type": name,
+        "margin": 0.5,
+        "ranking": [
+            {
+                "name": name or "endothelial cell",
+                "score": 1.0,
+                "program_on": True,
+                "program_specific": True,
+                "eligible": True,
+                "n_positive": 3,
+            }
+        ],
+        "evidence": {"de_not_in_markers": []},
+    }
 
 
 def test_a_nearest_name_without_majority_markers_is_not_written():
@@ -2330,6 +2633,164 @@ def test_umap_closeness_gives_the_clear_title_without_a_neighbor_graph():
     assert resolved["0"] == {"0": "fibroblast"}
 
 
+def _rank_table(genes, groups):
+    outside = pd.Series(0.85, index=genes)
+    return {
+        "params": {"groupby": "leiden"},
+        "names": {group: np.array(genes) for group in groups},
+        "logfoldchanges": {group: np.linspace(2, 1, len(genes)) for group in groups},
+        "pts": pd.DataFrame({group: pd.Series(0.95, index=genes) for group in groups}),
+        "pts_rest": pd.DataFrame({group: outside for group in groups}),
+    }
+
+
+def test_annotation_code_runs_after_dropping_clusters():
+    import matplotlib
+
+    matplotlib.use("Agg", force=False)
+    from annotuneagent.workflow import annotation_code
+
+    labels = ["0"] * 8 + ["1"] * 8 + ["12"] * 8
+    adata = AnnData(X=np.random.default_rng(0).random((24, 4)))
+    adata.obs["leiden"] = pd.Categorical(labels)
+    adata.var_names = ["Cd3d", "Cd79a", "Acta2", "Tagln"]
+    adata.obsm["X_umap"] = np.zeros((24, 2))
+    adata.uns["log1p"] = {"base": None}
+    adata.obs["annotune_label"] = adata.obs["leiden"].map(
+        {"0": "T cell", "1": "B cell", "12": "granulocyte-monocyte progenitor"}
+    )
+    code = annotation_code(
+        adata,
+        [],
+        "leiden",
+        "annotune_label",
+        {
+            "T cell": ["Cd3d"],
+            "B cell": ["Cd79a"],
+            "granulocyte-monocyte progenitor": ["Acta2", "Tagln"],
+        },
+        ["T cell", "B cell", "granulocyte-monocyte progenitor"],
+    )
+    code = code.replace("drop_clusters = []", 'drop_clusters = ["12", 1]', 1)
+    namespace = {"adata": adata}
+    exec(code, namespace)
+    kept = namespace["adata"]
+    assert set(kept.obs["leiden"].astype(str)) == {"0"}
+    assert list(kept.obs["celltype"].cat.categories) == ["T cell"]
+
+
+def test_split_skips_a_cluster_whose_cells_were_removed():
+    from annotuneagent.workflow import _lineage_resources, _split_lineage_disagreements
+
+    dag, label_map, _known = _lineage_resources("mouse")
+    adata = AnnData(X=np.zeros((4, 1)), obs={"leiden": ["1", "1", "2", "2"]})
+    record = {
+        "cluster": "12",
+        "ranking": [],
+        "written_label": None,
+        "final_status": "removed",
+        "final_reason": "low_quality",
+        "rounds": [
+            {"step": "name", "names": ["T cell"]},
+            {"step": "ml", "names": ["B cell"]},
+        ],
+    }
+    _split_lineage_disagreements(
+        adata,
+        "leiden",
+        [record],
+        [],
+        [],
+        {},
+        {},
+        min_margin=0.15,
+        ranker=None,
+        conformal_q=None,
+        min_subcluster_cells=40,
+        species="mouse",
+        dag=dag,
+        label_map=label_map,
+        arbitration=[],
+    )
+    assert record["final_reason"] == "low_quality"
+
+
+def test_half_of_the_leading_genes_counts_as_ribosomal():
+    from annotuneagent.workflow import _ribosomal_signature
+
+    def table(n_ribo: int) -> AnnData:
+        genes = [f"Rps{i}" for i in range(n_ribo)] + [f"Gene{i}" for i in range(20 - n_ribo)]
+        adata = AnnData(X=np.zeros((4, 1)), obs={"leiden": ["0"] * 4})
+        adata.uns["rank_genes_groups"] = {
+            "names": {"0": np.array(genes)},
+            "logfoldchanges": {"0": np.linspace(2, 1, 20)},
+            "pts_rest": pd.DataFrame({"0": pd.Series(0.85, index=genes)}),
+        }
+        return adata
+
+    assert _ribosomal_signature(table(10), "0") is True
+    assert _ribosomal_signature(table(9), "0") is False
+
+
+def test_a_ribosomal_cluster_with_no_title_is_removed(monkeypatch):
+    from annotuneagent.workflow import _drop_ribosomal_clusters, _fill_blank_labels_by_umap
+
+    monkeypatch.setattr("annotuneagent.workflow.wilcoxon_order", lambda adata, cluster_key: {})
+
+    ribo = [f"Rps{i}" for i in range(18)] + ["Ppia", "Ptma"]
+    specific = [f"Gene{i}" for i in range(20)]
+    adata = AnnData(
+        X=np.zeros((30, 1)),
+        obs={"leiden": ["12"] * 10 + ["14"] * 10 + ["13"] * 10},
+    )
+    adata.var_names = ["G"]
+    adata.uns["log1p"] = {"base": None}
+    adata.obsm["X_umap"] = np.vstack(
+        [np.zeros((10, 2)), np.full((10, 2), 1.0), np.full((10, 2), 0.04)]
+    )
+    adata.uns["rank_genes_groups"] = _rank_table(ribo, ["12", "13"])
+    specific_table = _rank_table(specific, ["14"])
+    for key in ("names", "logfoldchanges"):
+        adata.uns["rank_genes_groups"][key]["14"] = specific_table[key]["14"]
+    adata.uns["rank_genes_groups"]["pts"]["14"] = specific_table["pts"]["14"]
+    adata.uns["rank_genes_groups"]["pts_rest"]["14"] = specific_table["pts_rest"]["14"]
+    blank = {
+        "cluster": "12",
+        "written_label": None,
+        "final_status": "out_of_dictionary",
+        "final_reason": "out_of_dictionary",
+        "hint": "unexplained: Ctla2a",
+    }
+    other_blank = {
+        "cluster": "14",
+        "written_label": None,
+        "final_status": "out_of_dictionary",
+        "final_reason": "out_of_dictionary",
+        "hint": "unexplained: Ctla2a",
+    }
+    named = {
+        "cluster": "13",
+        "written_label": "granulocyte-monocyte progenitor",
+        "final_status": "named",
+        "final_reason": "evidence_agreement",
+        "hint": None,
+    }
+    resolved = {"13": {"13": "granulocyte-monocyte progenitor"}}
+    _drop_ribosomal_clusters(adata, "leiden", [blank, other_blank, named], resolved)
+    assert blank["final_reason"] == "low_quality"
+    assert blank["hint"] == "ribosomal genes only"
+    assert blank["cells_removed"] == 10
+    assert "12" not in resolved
+    assert other_blank["final_reason"] == "out_of_dictionary"
+    assert other_blank["written_label"] is None
+    assert named["written_label"] == "granulocyte-monocyte progenitor"
+    assert set(adata.obs["leiden"].astype(str)) == {"14", "13"}
+    _fill_blank_labels_by_umap(
+        adata, "leiden", [blank, other_blank, named], resolved, None, None, None
+    )
+    assert blank["written_label"] is None
+
+
 def test_a_blank_cluster_beside_one_lineage_takes_that_name():
     from annotuneagent.workflow import _fill_blank_labels_by_umap
 
@@ -2427,6 +2888,35 @@ def test_a_blank_cluster_beside_one_lineage_takes_that_name():
     )
     assert untouched["written_label"] is None
     assert "0" not in blocked
+
+
+def test_two_names_are_not_split_into_more_than_two_clusters(monkeypatch):
+    import scanpy as sc
+
+    part = AnnData(np.random.default_rng(0).normal(size=(141, 6)))
+
+    def fake_pca(adata, **_kwargs):
+        adata.obsm["X_pca"] = np.asarray(adata.X)[:, :2]
+
+    def fake_leiden(adata, **kwargs):
+        if kwargs["resolution"] >= 0.2:
+            labels = np.array(["0"] * 40 + ["1"] * 40 + ["2"] * 40 + ["3"] * 21)
+        else:
+            labels = np.array(["0"] * 70 + ["1"] * 71)
+        adata.obs["annotune_sub_try"] = labels
+
+    monkeypatch.setattr(sc.pp, "pca", fake_pca)
+    monkeypatch.setattr(sc.pp, "neighbors", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sc.tl, "leiden", fake_leiden)
+    assert wf._subcluster(part, max_clusters=2) is True
+    assert part.obs[wf.SUBCLUSTER_KEY].nunique() == 2
+
+
+def test_a_cluster_of_141_cells_is_not_tried_at_resolution_0_6():
+    assert wf._subcluster_resolutions(141) == (0.1, 0.2)
+    assert max(wf._subcluster_resolutions(141)) <= 0.2
+    assert wf._subcluster_resolutions(300) == (0.2, 0.4)
+    assert wf._subcluster_resolutions(3000) == wf.SUBCLUSTER_RESOLUTIONS
 
 
 def test_subcluster_sample_keeps_a_rare_group(monkeypatch):

@@ -610,7 +610,7 @@ def test_show_prints_qc_rules_and_cell_counts(capsys, monkeypatch):
     import scanpy as sc
 
     monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
-    for name in ("highest_expr_genes", "violin", "scatter", "highly_variable_genes", "umap"):
+    for name in ("highest_expr_genes", "violin", "umap"):
         monkeypatch.setattr(sc.pl, name, lambda *args, **kwargs: None)
     out = prepare(_counts(), species="mouse", n_pcs=5, show=True)
     prep = out.uns["annotune_prep"]
@@ -633,15 +633,18 @@ def test_show_prints_qc_rules_and_cell_counts(capsys, monkeypatch):
     glow = int(round(_on_count_scale("log1p_n_genes_by_counts", genes["low"])))
     ghigh = int(round(_on_count_scale("log1p_n_genes_by_counts", genes["high"])))
     assert f"genes per cell: {glow:,} to {ghigh:,}" in report
-    mito = rules["logit_mt_fraction"]
-    mpct = _on_count_scale("logit_mt_fraction", mito["high"])
-    assert f"mitochondrial percent: {mpct:.1f}".rstrip("0").rstrip(".") in report
+    mito = rules["log1p_pct_counts_mt"]
+    if mito["high"] is None:
+        assert "mitochondrial percent: no cutoff" in report
+    else:
+        mpct = _on_count_scale("log1p_pct_counts_mt", mito["high"])
+        shown = f"{mpct:.1f}".rstrip("0").rstrip(".")
+        assert f"mitochondrial percent: {shown}" in report
     assert report in capsys.readouterr().out
 
 
 def test_qc_report_matches_direct_mad_counts():
     import scanpy as sc
-    from scipy.special import logit
 
     probe = _varied_counts()
     qc = _filter_qc(probe.copy(), "mouse", "batch", 5.0, 90)
@@ -655,8 +658,7 @@ def test_qc_report_matches_direct_mad_counts():
     sc.pp.calculate_qc_metrics(
         probe, qc_vars=["mt", "ribo", "hb"], percent_top=None, log1p=True, inplace=True
     )
-    fraction = (probe.obs["total_counts_mt"] + 1) / (probe.obs["total_counts"] + 2)
-    probe.obs["logit_mt_fraction"] = logit(np.clip(fraction, 1e-6, 1 - 1e-6))
+    probe.obs["log1p_pct_counts_mt"] = np.log1p(probe.obs["pct_counts_mt"].to_numpy(dtype=float))
     for batch in qc["batches"]:
         mask = probe.obs["batch"].astype(str).to_numpy() == batch["batch"]
         pct = probe.obs["pct_counts_mt"].to_numpy()[mask]
@@ -665,13 +667,13 @@ def test_qc_report_matches_direct_mad_counts():
         assert [rule["metric"] for rule in batch["rules"]] == [
             "log1p_total_counts",
             "log1p_n_genes_by_counts",
-            "logit_mt_fraction",
+            "log1p_pct_counts_mt",
         ]
         for rule in batch["rules"]:
             values = probe.obs[rule["metric"]].to_numpy()[mask]
             med = float(np.median(values))
             mad = float(stats.median_abs_deviation(values))
-            scale = 3.0 if rule["metric"] == "logit_mt_fraction" else 5.0
+            scale = 3.0 if rule["metric"] == "log1p_pct_counts_mt" else 5.0
             assert rule["median"] == pytest.approx(med)
             assert rule["mad"] == pytest.approx(mad)
             if not np.isfinite(mad) or mad == 0:

@@ -61,6 +61,8 @@ MERGED_KEY = "annotune_cluster"
 MIN_SUBCLUSTER_CELLS = 40
 MIN_AUTOLABEL_CELLS = 20
 SUBCLUSTER_RESOLUTIONS = (0.6, 1.0, 1.4)
+# 0.6 splits 141 cells into four groups. 0.2 leaves the two populations.
+_COARSE_SUBCLUSTER = 500
 
 
 @dataclass(frozen=True)
@@ -800,7 +802,42 @@ def _print_queries(records: list[dict]) -> None:
         print(flush=True)
 
 
-def _attach_queries(adata, cluster_key, records, hypotheses, species, tissue) -> None:
+def _marker_judgment(record: dict) -> str | None:
+    """One line for a subcluster: the written name, or the programs that are on."""
+    ranked = [
+        row for row in record.get("ranking") or [] if _row_support(row) in {"specific", "detected"}
+    ]
+    ranked.sort(key=lambda row: _row_support(row) != "specific")
+    bits = [f"{row.get('name')} {_row_support(row)}" for row in ranked[:4]]
+    named = record.get("status") == "label" and bool(record.get("cell_type"))
+    label = str(record["cell_type"]) if named else None
+    if label and bits:
+        return f"Judgment: {label} ({'; '.join(bits)})."
+    if label:
+        return f"Judgment: {label}."
+    if bits:
+        return "Judgment: " + "; ".join(bits) + ". No single name."
+    return None
+
+
+def _publish_child_records(children: list[dict]) -> list[dict]:
+    """Give each remaining child a title field the report can print."""
+    rows = [row for item in children for row in item["records"]]
+    for record in rows:
+        if record.get("status") == "label" and record.get("cell_type"):
+            record["written_label"] = record.get("written_label") or record["cell_type"]
+        elif "written_label" not in record:
+            record["written_label"] = None
+        if not record.get("final_reason"):
+            record["final_reason"] = (
+                "marker_rule" if record.get("written_label") else "subcluster_labels"
+            )
+    return rows
+
+
+def _attach_queries(
+    adata, cluster_key, records, hypotheses, species, tissue, *, with_judgment: bool = False
+) -> None:
     """Pasteable gene features for every cluster."""
     pending = [record for record in records if _needs_query(record)]
     if not pending:
@@ -830,6 +867,12 @@ def _attach_queries(adata, cluster_key, records, hypotheses, species, tissue) ->
             programs=programs,
             by_name=by_name,
         )
+        if text and with_judgment:
+            judgment = _marker_judgment(record)
+            if judgment:
+                lines = text.splitlines()
+                lines.insert(1, judgment)
+                text = "\n".join(lines)
         if text:
             record["query"] = text
 
@@ -874,7 +917,7 @@ def _cluster_query(
         text = feature(gene)
         if text:
             enriched.append(text)
-        if len(enriched) >= 10:
+        if len(enriched) >= 20:
             break
     present: list[str] = []
     for name in programs:
@@ -1004,7 +1047,22 @@ def _variable_genes(part: AnnData) -> int:
 SILHOUETTE_SAMPLE = 2000
 
 
-def _subcluster(part: AnnData) -> bool:
+def _subcluster_resolutions(n_obs: int) -> tuple[float, ...]:
+    """Resolutions to try. A small cluster is not searched from 0.6.
+
+    On 141 cells, 0.6 makes four groups and 0.2 makes two. The two-group
+    split has the higher silhouette. Below 200 cells the grid is 0.1 and
+    0.2. From 200 to 499 it is 0.2 and 0.4. Larger clusters use 0.6, 1.0,
+    and 1.4. Silhouette still chooses among the grid.
+    """
+    if n_obs < 200:
+        return (0.1, 0.2)
+    if n_obs < _COARSE_SUBCLUSTER:
+        return (0.2, 0.4)
+    return SUBCLUSTER_RESOLUTIONS
+
+
+def _subcluster(part: AnnData, *, max_clusters: int | None = None) -> bool:
     if _variable_genes(part) < 2:
         return False
     n_comps = min(10, part.n_obs - 1, part.n_vars - 1)
@@ -1014,9 +1072,13 @@ def _subcluster(part: AnnData) -> bool:
     sc.pp.neighbors(part, n_pcs=n_comps)
     from sklearn.metrics import silhouette_score
 
+    resolutions = _subcluster_resolutions(part.n_obs)
+    if max_clusters == 2:
+        # Two candidate names get two groups. Try coarser resolutions first.
+        resolutions = tuple(dict.fromkeys((0.05, 0.1, *resolutions)))
     best_labels = None
     best_score = -1.0
-    for resolution in SUBCLUSTER_RESOLUTIONS:
+    for resolution in resolutions:
         sc.tl.leiden(
             part,
             resolution=resolution,
@@ -1026,7 +1088,10 @@ def _subcluster(part: AnnData) -> bool:
             random_state=0,
         )
         labels = part.obs["annotune_sub_try"].astype(str)
-        if int(labels.nunique()) < 2 or int(labels.nunique()) >= part.n_obs:
+        n_groups = int(labels.nunique())
+        if n_groups < 2 or n_groups >= part.n_obs:
+            continue
+        if max_clusters is not None and n_groups > max_clusters:
             continue
         if part.n_obs > SILHOUETTE_SAMPLE:
             groups = labels.groupby(labels).indices
@@ -1047,6 +1112,79 @@ def _subcluster(part: AnnData) -> bool:
         return False
     part.obs[SUBCLUSTER_KEY] = best_labels
     return True
+
+
+def _endothelial_pericyte_calls(name: str | None, ml: str | None) -> bool:
+    return {name, ml} == {"endothelial cell", "pericyte"}
+
+
+_MURAL_NAMES = frozenset({"pericyte", "smooth muscle cell"})
+_MURAL_HINT = "pericyte or smooth muscle cell"
+_SPLIT_SCORE_KEY = "_annotune_split_score"
+
+
+def _withhold_shared_mural(row: dict) -> bool:
+    """Leave a child unnamed when pericyte and smooth muscle are both specific.
+
+    The two panels share genes. A higher score is not a reason to write one
+    of them. A child whose title is a different type is left as it is.
+    """
+    ranking = list(row.get("ranking") or [])
+    specific = {
+        str(item.get("name"))
+        for item in ranking
+        if item.get("program_specific") is True and str(item.get("name")) in _MURAL_NAMES
+    }
+    if specific != _MURAL_NAMES:
+        return False
+    label = row.get("cell_type")
+    top = str(ranking[0].get("name")) if ranking else None
+    if label is not None and str(label) not in _MURAL_NAMES:
+        return False
+    if label is None and top not in _MURAL_NAMES:
+        return False
+    ordered = [str(item.get("name")) for item in ranking if str(item.get("name")) in _MURAL_NAMES]
+    row["status"] = "uncertain"
+    row["cell_type"] = None
+    row["hint"] = _MURAL_HINT
+    row["choices"] = ordered[:2] if len(ordered) >= 2 else ["pericyte", "smooth muscle cell"]
+    return True
+
+
+def _annotate_split_children(
+    adata, cluster_key, part, hypotheses, min_margin, ranker, conformal_q
+) -> list[dict[str, object]]:
+    """Score each child against every other cell, including cells outside the parent.
+
+    Comparison inside the parent alone treats a gene shared with the sibling
+    as nonspecific. The temporary column is removed before this returns.
+    """
+    child = part.obs[SUBCLUSTER_KEY].astype(str)
+    tagged = "split:" + child
+    column = adata.obs[cluster_key].astype(str).copy()
+    column.loc[part.obs_names] = tagged.to_numpy()
+    adata.obs[_SPLIT_SCORE_KEY] = column
+    try:
+        wanted = list(dict.fromkeys(tagged.tolist()))
+        rows = _annotate(
+            adata,
+            _SPLIT_SCORE_KEY,
+            hypotheses,
+            min_margin,
+            ranker,
+            conformal_q,
+            clusters=wanted,
+        )
+    finally:
+        if _SPLIT_SCORE_KEY in adata.obs.columns:
+            del adata.obs[_SPLIT_SCORE_KEY]
+    by_tag = {str(row["cluster"]): row for row in rows}
+    ordered = []
+    for tag in wanted:
+        row = by_tag[tag]
+        row["cluster"] = tag.removeprefix("split:")
+        ordered.append(row)
+    return ordered
 
 
 def _install_split(adata, cluster_key: str, mask, part: AnnData, parent: str) -> None:
@@ -1121,9 +1259,18 @@ def _split_lineage_disagreements(
     The split is kept only when the children receive more than one marker
     title. A marker title on the parent does not block this pass. A split
     that does not separate is left unset, and the parent title stays.
+    Children are scored against every other cell. Endothelial cell against
+    pericyte keeps a split when a child stays unlabeled. That child is left
+    unlabeled when pericyte and smooth muscle cell are both specific, and
+    the hint is ``pericyte or smooth muscle cell``. One specific program is
+    written. Each labeled child names every cell in that child.
     """
     for record in records:
         cluster = str(record["cluster"])
+        if record.get("final_status") == "removed" or record.get("final_reason") == "low_quality":
+            continue
+        if not (adata.obs[cluster_key].astype(str) == cluster).any():
+            continue
         if cytotoxic_mixture(record.get("ranking")):
             continue
         name = _proposal_name(record, "name")
@@ -1137,23 +1284,37 @@ def _split_lineage_disagreements(
         if int(mask.sum()) < min_subcluster_cells:
             continue
         part = adata[mask].copy()
-        if not _subcluster(part):
+        # Two names, so the split stops at two groups.
+        if not _subcluster(part, max_clusters=2):
             continue
-        child_records = _annotate(part, SUBCLUSTER_KEY, kept, min_margin, ranker, conformal_q)
+        if int(part.obs[SUBCLUSTER_KEY].astype(str).nunique()) > 2:
+            continue
+        child_records = _annotate_split_children(
+            adata, cluster_key, part, kept, min_margin, ranker, conformal_q
+        )
+        pair = _endothelial_pericyte_calls(name, ml)
+        if pair:
+            for row in child_records:
+                _withhold_shared_mural(row)
+        labeled_rows = [
+            row for row in child_records if row.get("status") == "label" and row.get("cell_type")
+        ]
+        child_names = {str(row["cell_type"]) for row in labeled_rows}
+        withheld = any(
+            row.get("hint") == _MURAL_HINT and not row.get("cell_type") for row in child_records
+        )
+        if pair:
+            if len(child_names) < 2 and not (child_names and withheld):
+                continue
+        elif not _children_labeled(child_records) or len(child_names) < 2:
+            continue
         for child in child_records:
             child["parent"] = cluster
             child["cluster"] = f"{cluster}.{child['cluster']}"
-        child_names = {
-            str(row["cell_type"])
-            for row in child_records
-            if row.get("status") == "label" and row.get("cell_type")
-        }
-        if not _children_labeled(child_records) or len(child_names) < 2:
-            continue
         _install_split(adata, cluster_key, mask, part, cluster)
-        resolved[cluster] = _child_label_map(child_records)
+        resolved[cluster] = _child_label_map(labeled_rows)
         record["written_label"] = None
-        record["hint"] = None
+        record["hint"] = _MURAL_HINT if withheld else None
         record["arbitration"] = False
         record["final_status"] = "named"
         record["final_reason"] = "subcluster_labels"
@@ -1164,11 +1325,15 @@ def _split_lineage_disagreements(
         by_parent[cluster] = child_records
 
 
-def _cluster_order(cluster: str) -> tuple[int, object]:
-    try:
-        return (0, int(cluster))
-    except ValueError:
-        return (1, cluster)
+def _cluster_order(cluster: str) -> tuple:
+    """Sort ``16`` before ``16.0`` and ``16.1``, and ``2`` before ``10``."""
+    keys = []
+    for part in str(cluster).split("."):
+        try:
+            keys.append((0, int(part)))
+        except ValueError:
+            keys.append((1, part))
+    return tuple(keys)
 
 
 def annotation_code(
@@ -1187,7 +1352,7 @@ def annotation_code(
     for unit in units.unique():
         labels = adata.obs.loc[units == unit, label_key]
         names = labels.dropna().astype(str).unique()
-        if not labels.isna().any() and len(names) == 1:
+        if len(names) == 1:
             assigned[str(unit)] = str(names[0])
     for record in records:
         cluster = str(record["cluster"])
@@ -1214,6 +1379,15 @@ def annotation_code(
         "# cluster2celltype maps each cluster id to its name.",
         "# fine_order is the UMAP legend and the dotplot row order.",
         "# marker_dict is the dotplot. Gene order inside a list is the column order.",
+        "# drop_clusters removes those clusters before the labels and plots.",
+        '# Put one id or several, for example ["12"] or ["12", "15"].',
+        "drop_clusters = []",
+        "if drop_clusters:",
+        "    drop_ids = {str(item) for item in drop_clusters}",
+        f"    adata = adata[~adata.obs[{group_key!r}].astype(str).isin(drop_ids)].copy()",
+        f"    if isinstance(adata.obs[{group_key!r}].dtype, pd.CategoricalDtype):",
+        f"        adata.obs[{group_key!r}] = adata.obs[{group_key!r}].cat.remove_unused_categories()",
+        "",
         "cluster2celltype = {",
     ]
     for cluster, name in mapping.items():
@@ -1238,13 +1412,16 @@ def annotation_code(
             "]",
             "",
             f"assert {group_key!r} in adata.obs, 'run this on the annotated h5ad written by annotune'",
+            f"was_blank = adata.obs[{label_key!r}].isna()",
             f"adata.obs['celltype'] = adata.obs[{group_key!r}].astype(str).map(cluster2celltype)",
+            "adata.obs.loc[was_blank, 'celltype'] = pd.NA",
+            "fine_order = [name for name in fine_order if (adata.obs['celltype'] == name).any()]",
             "adata.obs['celltype'] = pd.Categorical(",
             "    adata.obs['celltype'], categories=fine_order, ordered=True",
             ")",
             "print(adata.obs['celltype'].isna().sum(), 'cells without a label')",
             "print(adata.obs['celltype'].value_counts())",
-            "if 'X_umap' in adata.obsm:",
+            "if 'X_umap' in adata.obsm and len(adata):",
             "    sc.pl.umap(adata, color='celltype', frameon=False)",
             "",
             "# Cited dictionary markers. Types flagged no_marker_passed show their best measured genes.",
@@ -1262,11 +1439,12 @@ def annotation_code(
             [
                 "# Keep marker columns in the same order as the cell type rows.",
                 "ordered_marker_dict = {name: marker_dict[name] for name in fine_order if name in marker_dict}",
-                "sc.pl.dotplot(",
-                "    adata[adata.obs['celltype'].notna()].copy(), ordered_marker_dict,",
-                "    groupby='celltype', categories_order=fine_order,",
-                "    dendrogram=False, use_raw=False, standard_scale='var',",
-                ")",
+                "if ordered_marker_dict and adata.obs['celltype'].notna().any():",
+                "    sc.pl.dotplot(",
+                "        adata[adata.obs['celltype'].notna()].copy(), ordered_marker_dict,",
+                "        groupby='celltype', categories_order=fine_order,",
+                "        dendrogram=False, use_raw=False, standard_scale='var',",
+                "    )",
             ]
         )
     lines.append("")
@@ -1308,13 +1486,21 @@ def run(
     payload. Clear clusters are written to ``label_key``. Uncertain clusters
     are subclustered once. A split whose cells all receive one title is
     dropped. A cluster is also split when the name and ML calls are different
-    lineages and the children receive more than one title. A cluster whose
+    lineages and the children receive more than one title. Children of that
+    split are scored against every other cell. When those calls are
+    endothelial cell and pericyte, a child that stays unlabeled does not
+    drop the split. A child that is specific for both pericyte and smooth
+    muscle cell is left unlabeled, with the hint ``pericyte or smooth muscle
+    cell``. One specific program is written. A labeled child names every
+    cell in that child.
+    A cluster whose
     NK and T panels are both specific is split even when the marker score
     named it, unless the top panel is a specific mature NK T cell. Child
     labels of that mixture are written only when every child has a label.
     Each step prints when it starts and how many seconds
     it took. Every cluster prints a gene query that can be pasted into another
-    model. A local
+    model. Each remaining child prints one too, with its marker judgment and
+    the genes enriched against the other cells. A local
     server started for the adapters stays loaded after this call.
 
     With ``models``, the name and ML models are asked for every cluster, or
@@ -1457,6 +1643,7 @@ def run(
             record["final_reason"] = "cytotoxic_mixture"
             record["hint"] = "NK and T programs are both enriched"
         _sync_guard(record, resolved)
+    _drop_ribosomal_clusters(adata, cluster_key, records, resolved)
     _apply_neighbor_titles(adata, cluster_key, records, resolved, species, dag, label_map)
     _fill_blank_labels_by_umap(adata, cluster_key, records, resolved, species, dag, label_map)
     if subcluster and models is not None:
@@ -1534,6 +1721,17 @@ def run(
         _attach_queries(adata, cluster_key, records, [*kept, *added_hypotheses], species, tissue)
         note["detail"] = f"{len(marker_dict)} types"
     children = _collapse_uniform_splits(adata, cluster_key, label_key, records, children, resolved)
+    child_records = _publish_child_records(children)
+    if child_records and SUBCLUSTER_KEY in adata.obs.columns:
+        _attach_queries(
+            adata,
+            SUBCLUSTER_KEY,
+            child_records,
+            [*kept, *added_hypotheses],
+            species,
+            tissue,
+            with_judgment=True,
+        )
     labels = _assign_labels(adata, cluster_key, resolved)
     written = bool(labels.notna().any())
     adata.obs[label_key] = labels.astype("category")
@@ -1561,7 +1759,7 @@ def run(
         type_order,
     )
     merged = merge_same_labels(adata, cluster_key, label_key)
-    clusters = _cluster_rows(adata, cluster_key, records, species)
+    clusters = _cluster_rows(adata, cluster_key, records, species, children)
     report = {
         "records": records,
         "clusters": clusters,
@@ -1594,7 +1792,12 @@ def run(
         },
         "annotation_code": code,
     }
-    _print_queries(records)
+    _print_queries(
+        sorted(
+            [*records, *child_records],
+            key=lambda row: _cluster_order(str(row["cluster"])),
+        )
+    )
     print(
         f"run  done  {time.perf_counter() - started:.1f}s  "
         f"{sum(bool(record.get('written_label')) for record in records)} of {len(records)} clusters named",
@@ -1638,29 +1841,48 @@ def _ontology_note(label_map, label: object, species: str | None) -> dict[str, o
 
 
 def _cluster_rows(
-    adata: AnnData, cluster_key: str, records: list[dict], species: str | None
+    adata: AnnData,
+    cluster_key: str,
+    records: list[dict],
+    species: str | None,
+    children: list[dict] | None = None,
 ) -> list[dict[str, object]]:
-    """One row per cluster. Sources stay separate. Ontology is an exact map lookup."""
+    """One row per cluster, plus one row per remaining subcluster.
+
+    Sources stay separate. Ontology is an exact map lookup.
+    """
     label_map = _lineage_resources(species)[1] if species else None
     rows = []
-    for record in sorted(records, key=lambda row: _cluster_order(str(row["cluster"]))):
+    for record in records:
         cluster = str(record["cluster"])
         label = record.get("written_label")
-        rows.append(
-            {
-                "cluster": cluster,
-                "cells": int((adata.obs[cluster_key].astype(str) == cluster).sum()),
-                "marker": record.get("cell_type"),
-                "name": _model_name(record, "name"),
-                "ml": _model_name(record, "ml"),
-                "label": label,
-                "hint": record.get("hint"),
-                "query": record.get("query"),
-                "reason": record.get("final_reason"),
-                "ontology": _ontology_note(label_map, label, species),
-            }
-        )
+        present = int((adata.obs[cluster_key].astype(str) == cluster).sum())
+        rows.append(_cluster_row(record, cluster, present, label, species, label_map))
+    if children and SUBCLUSTER_KEY in adata.obs.columns:
+        groups = adata.obs[SUBCLUSTER_KEY].astype(str)
+        for item in children:
+            for record in item["records"]:
+                cluster = str(record["cluster"])
+                label = record.get("written_label")
+                present = int((groups == cluster).sum())
+                rows.append(_cluster_row(record, cluster, present, label, species, label_map))
+    rows.sort(key=lambda row: _cluster_order(str(row["cluster"])))
     return rows
+
+
+def _cluster_row(record, cluster, present, label, species, label_map) -> dict[str, object]:
+    return {
+        "cluster": cluster,
+        "cells": present or int(record.get("cells_removed") or 0),
+        "marker": record.get("cell_type"),
+        "name": _model_name(record, "name"),
+        "ml": _model_name(record, "ml"),
+        "label": label,
+        "hint": record.get("hint"),
+        "query": record.get("query"),
+        "reason": record.get("final_reason"),
+        "ontology": _ontology_note(label_map, label, species),
+    }
 
 
 def _review_rows(clusters: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -1688,6 +1910,8 @@ def _review_rows(clusters: list[dict[str, object]]) -> list[dict[str, object]]:
 def _review_priority(row: dict[str, object]) -> int | None:
     reason = str(row.get("reason") or "")
     hint = str(row.get("hint") or "")
+    if reason == "low_quality":
+        return None
     if (
         reason in {"weak_agreement", "out_of_dictionary", "endothelial_not_pericyte"}
         or "endothelial cell rather than pericyte" in hint
@@ -1734,7 +1958,6 @@ def _show_annotation(adata, cluster_key: str, label_key: str, report: dict) -> N
     _print_review(report["review"])
     print("merged", report["merged"])
     sc.pl.umap(adata, color=label_key, legend_loc="right margin", frameon=False, show=True)
-    sc.pl.umap(adata, color=MERGED_KEY, legend_loc="on data", title=MERGED_KEY, show=True)
 
 
 def _print_dropped(dropped: list[dict[str, object]]) -> None:
@@ -2139,10 +2362,12 @@ def _flag_labels_without_markers(
 
     The name stays written and the record keeps a hint, so it is still queued
     for review. A marker call replaces it when that call passed, or once when
-    it has not been checked. Name and ML agreement on another lineage replaces
-    a failed name, including one the marker call just failed. A marker call
-    that already failed is not tried again. Returns True when a name was
-    replaced.
+    it has not been checked, unless the name and ML models already agree on
+    the written name. Agreement yields when the other marker program is
+    specific and the agreed program is not on. Agreement on another lineage
+    replaces a failed name,
+    including one the marker call just failed. A marker call that already
+    failed is not tried again. Returns True when a name was replaced.
     """
     blocked = {
         name
@@ -2172,7 +2397,19 @@ def _flag_labels_without_markers(
         marker = record.get("cell_type") if record.get("status") == "label" else None
         marker_passed = bool(marker) and marker_status.get(marker) == "selected"
         marker_untried = bool(marker) and marker not in marker_status and marker not in failed
-        if marker and marker != label and (marker_passed or marker_untried):
+        agreed = _agreed_model_name(record, species, dag, label_map)
+        # Agreement keeps the title against another marker call. It yields when
+        # that marker program is specific and the agreed program is not on.
+        agreed_on_label = bool(agreed) and _same_lineage(
+            agreed, str(label), species, dag, label_map
+        )
+        program_yields = _specific_marker_against_absent_program(record, marker, str(label))
+        if (
+            marker
+            and marker != label
+            and (marker_passed or marker_untried)
+            and not (agreed_on_label and not program_yields)
+        ):
             changed = True
             record["written_label"] = marker
             record["final_status"] = "named"
@@ -2181,8 +2418,7 @@ def _flag_labels_without_markers(
             resolved[cluster] = {cluster: str(marker)}
             _sync_guard(record, resolved)
             continue
-        agreed = _agreed_model_name(record, species, dag, label_map)
-        if agreed and not _same_lineage(agreed, str(label), species, dag, label_map):
+        if agreed and not agreed_on_label:
             changed = True
             record["written_label"] = agreed
             record["final_status"] = "named"
@@ -2202,6 +2438,18 @@ def _flag_labels_without_markers(
         record["hint"] = "no marker passed" if not hint else f"{hint}; no marker passed"
         _sync_guard(record, resolved)
     return changed
+
+
+def _specific_marker_against_absent_program(record: dict, marker, label: str) -> bool:
+    """True when the marker program is specific and the written program is off."""
+    if not marker:
+        return False
+    ranking = record.get("ranking") or []
+    marker_row = next((row for row in ranking if row.get("name") == marker), None)
+    label_row = next((row for row in ranking if row.get("name") == label), None)
+    if marker_row is None or marker_row.get("program_specific") is not True:
+        return False
+    return label_row is None or label_row.get("program_on") is not True
 
 
 def _agreed_model_name(record: dict, species, dag, label_map) -> str | None:
@@ -2365,7 +2613,11 @@ def _apply_neighbor_titles(adata, cluster_key, records, resolved, species, dag, 
     linked = _linked_clusters(adata, cluster_key)
     for record in records:
         cluster = str(record["cluster"])
-        if cluster in clear or record.get("final_reason") == "subcluster_labels":
+        if (
+            cluster in clear
+            or record.get("final_reason") in {"subcluster_labels", "low_quality"}
+            or record.get("final_status") == "removed"
+        ):
             continue
         mapping = resolved.get(cluster)
         if mapping and set(mapping) != {cluster}:
@@ -2567,6 +2819,89 @@ def _connectivity_ratios(labels: np.ndarray, adjacency) -> dict[str, list[tuple[
     return result
 
 
+def _ribosomal_gene(gene: str) -> bool:
+    folded = str(gene).casefold()
+    return folded.startswith(("rps", "rpl"))
+
+
+def _ribosomal_signature(adata: AnnData, cluster: str) -> bool:
+    """True when the leading genes are ribosomal proteins shared with other cells.
+
+    The window is the same 20 positive genes the query prints. At least half
+    of them must be ribosomal, and the median share of other cells that
+    express those genes must be at least 70%. A high ribosomal count share
+    is not itself this test. A missing title is not either.
+    """
+    result = adata.uns.get("rank_genes_groups")
+    if not result or "names" not in result or "pts_rest" not in result:
+        return False
+    key = str(cluster)
+    try:
+        names = [str(gene) for gene in result["names"][key]]
+        changes = [float(value) for value in result["logfoldchanges"][key]]
+        pct_out = result["pts_rest"][key]
+    except (KeyError, IndexError, TypeError, ValueError):
+        return False
+    chosen: list[str] = []
+    for gene, change in zip(names, changes, strict=True):
+        if change <= 0 or gene in chosen:
+            continue
+        chosen.append(gene)
+        if len(chosen) >= 20:
+            break
+    if len(chosen) < 10:
+        return False
+    ribo = [gene for gene in chosen if _ribosomal_gene(gene)]
+    if len(ribo) * 2 < len(chosen):
+        return False
+    try:
+        outside = [float(pct_out.loc[gene]) for gene in ribo]
+    except (KeyError, TypeError, ValueError):
+        return False
+    return bool(outside) and float(np.median(outside)) >= 0.7
+
+
+def _drop_ribosomal_clusters(adata, cluster_key, records, resolved) -> None:
+    """Remove an untitled cluster whose only enrichment is shared ribosomal genes.
+
+    A missing title does not remove a cluster. The cells are removed only when
+    that cluster also has no program of its own in the leading genes. A cluster
+    that already has a written title stays.
+    """
+    try:
+        wilcoxon_order(adata, cluster_key)
+    except ValueError:
+        return
+    labels = adata.obs[cluster_key].astype(str).to_numpy()
+    mask = np.zeros(adata.n_obs, dtype=bool)
+    for record in records:
+        cluster = str(record["cluster"])
+        if record.get("written_label") or record.get("final_reason") == "subcluster_labels":
+            continue
+        if not _ribosomal_signature(adata, cluster):
+            continue
+        hit = labels == cluster
+        removed = int(hit.sum())
+        if removed == 0:
+            continue
+        mask |= hit
+        record["written_label"] = None
+        record["final_status"] = "removed"
+        record["final_reason"] = "low_quality"
+        record["hint"] = "ribosomal genes only"
+        record["cells_removed"] = removed
+        resolved.pop(cluster, None)
+        print(
+            f"run  drop low-quality  cluster {cluster}  {removed} cells, ribosomal genes only",
+            flush=True,
+        )
+    if mask.any():
+        adata._inplace_subset_obs(~mask)
+        column = adata.obs[cluster_key]
+        if isinstance(column.dtype, pd.CategoricalDtype):
+            adata.obs[cluster_key] = column.cat.remove_unused_categories()
+
+
 def _fill_blank_labels_by_umap(
     adata, cluster_key, records, resolved, species, dag, label_map
 ) -> None:
@@ -2602,7 +2937,11 @@ def _fill_blank_labels_by_umap(
     clouds = {cluster: coords[labels == cluster] for cluster, _label in donors}
     for record in records:
         cluster = str(record["cluster"])
-        if record.get("written_label") or record.get("final_reason") == "subcluster_labels":
+        if (
+            record.get("written_label")
+            or record.get("final_reason") in {"subcluster_labels", "low_quality"}
+            or record.get("final_status") == "removed"
+        ):
             continue
         mapping = resolved.get(cluster)
         if mapping and set(mapping) != {cluster}:

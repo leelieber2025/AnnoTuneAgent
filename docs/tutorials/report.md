@@ -41,7 +41,7 @@ The first line is the species, the tissue when `run` was given one, the
 number of cells, and the question. Paste from this line through `Also
 detected`.
 
-`Enriched versus other cells` lists up to 10 genes that are higher in this
+`Enriched versus other cells` lists up to 20 genes that are higher in this
 cluster than in the other cells, in Wilcoxon order. `in` is the fraction of
 cells in the cluster where the gene is detected. `out` is that fraction in
 the other cells. `logfc` is the Scanpy log fold change.
@@ -49,6 +49,17 @@ the other cells. `logfc` is the Scanpy log fold change.
 `Also detected` lists markers of dictionary programs that are on in this
 cluster, detected in at least half of its cells, and not already in the
 enriched list. The list stops at 16 genes.
+
+A split adds one block for each child. The id is the child id, for example
+`16.0`. That paragraph has a `Judgment` line before the enriched genes. The
+genes are higher in that child than in the other cells. A child with no
+single name says so in that line.
+
+A cluster is removed only when it has no title of its own and at least half
+of those 20 genes are ribosomal proteins that are also detected in
+at least 70% of the other cells. The heading hint is `ribosomal genes only`.
+A missing title alone does not remove it. A high ribosomal count share does
+not remove a cluster that already has a title.
 
 A reply from the other model is not written back into `adata` or the report.
 Use it when you decide whether to keep or change the title in
@@ -64,14 +75,14 @@ title is not a vote count.
 
 | Column | What it is |
 |---|---|
-| `cluster` | Leiden id |
+| `cluster` | Leiden id. A remaining child of a split is an extra row, for example `16.0` |
 | `cells` | Cells in that cluster |
 | `marker` | Name from the marker score, or none |
 | `name` | First name copied by the name model. `failed` when the call failed. The action when the reply named nothing |
 | `ml` | First name copied by the ML model. `escalate` when it abstains. `failed` when the call failed |
 | `label` | Title written onto the cells. Empty when the cluster stays unnamed |
-| `hint` | The question printed after the title. Empty when there is nothing to ask. Weak agreement keeps its title and puts the doubt here. A name outside the dictionary is not written; this hint lists the unexplained genes. Endothelial cell is written instead of pericyte when an endothelial gene is enriched and no pericyte program gene is; the hint is `endothelial cell rather than pericyte` |
-| `query` | The paragraph to paste. Present for every cluster that has a Wilcoxon table |
+| `hint` | The question printed after the title. Empty when there is nothing to ask. Weak agreement keeps its title and puts the doubt here. A name outside the dictionary is not written; this hint lists the unexplained genes. Endothelial cell is written instead of pericyte when an endothelial gene is enriched and no pericyte program gene is; the hint is `endothelial cell rather than pericyte`. When a split child is specific for both pericyte and smooth muscle cell, neither name is written and the hint is `pericyte or smooth muscle cell` |
+| `query` | The paragraph to paste. Present for every cluster that has a Wilcoxon table, including each remaining child. A child paragraph includes the marker judgment |
 | `reason` | Why the title was written or withheld |
 | `ontology` | Cell Ontology id for the written title. `pending` means the id is not a reviewed row |
 
@@ -104,7 +115,7 @@ and on `annotune_hint`.
 |---|---|
 | `records` | The working record for each cluster, including model rounds and the marker ranking |
 | `dropped_hypotheses` | Dictionary types left out because none of their positive markers are in the matrix |
-| `subclusters` | One split of a cluster the marker score did not label, of a cytotoxic mixture whose top panel is not a specific mature NK T cell, and of a cluster whose name and ML calls are different lineages when the children receive more than one title. A split whose cells all have one title is dropped. Empty when `subcluster=False` or nothing was split |
+| `subclusters` | One split of a cluster the marker score did not label, of a cytotoxic mixture whose top panel is not a specific mature NK T cell, and of a cluster whose name and ML calls are different lineages when the children receive more than one title. Two names produce at most two child clusters, and every cell in a labeled child takes that child's name. Those children are scored against every other cell. A child specific for both pericyte and smooth muscle cell stays unlabeled. A split whose cells all have one title is dropped. Empty when `subcluster=False` or nothing was split |
 | `arbitration` | Clusters that were not given the status `named` |
 | `merged` | Titles that were given one `annotune_cluster` id |
 | `all_labeled` | True when every cell has a title |
@@ -122,6 +133,9 @@ and on `annotune_hint`.
 
 `annotation_code` copies the titles into `cluster2celltype`. Clusters with no
 title are left out of that map and listed under `cluster_choices` when the
-record has candidate names. Edit the map or `fine_order`, then run the
+record has candidate names. `drop_clusters` starts empty. Put cluster ids in
+that list, for example `["12"]` or `["12", "15"]`, to remove those cells
+before the labels and plots. A cell type that then has no cells is left out
+of the legend and the dotplot. Edit the map or `fine_order`, then run the
 snippet on the annotated object. {doc}`../quickstart` records the expression
 cutoffs used for the dotplot.

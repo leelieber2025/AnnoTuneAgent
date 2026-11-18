@@ -29,7 +29,6 @@ import numpy as np
 import scanpy as sc
 from anndata import AnnData
 from scipy import sparse, stats
-from scipy.special import expit, logit
 
 from .evidence import require_unique_var_names
 
@@ -349,9 +348,6 @@ def _show_prepared(adata: AnnData, cluster_key: str) -> None:
     print(_format_filter_report(adata.uns["annotune_prep"]))
     sc.pl.highest_expr_genes(adata, n_top=20, layer="counts", show=True)
     _qc_violin(adata)
-    sc.pl.scatter(adata, x="total_counts", y="n_genes_by_counts", show=True)
-    sc.pl.scatter(adata, x="total_counts", y="pct_counts_mt", show=True)
-    sc.pl.highly_variable_genes(adata, show=True)
     n_pcs = int(adata.uns["annotune_prep"]["n_pcs"])
     if n_pcs:
         ratio = adata.uns["pca"]["variance_ratio"]
@@ -749,10 +745,7 @@ def _filter_qc(
         log1p=True,
         inplace=True,
     )
-    total_mt = adata.obs["total_counts_mt"].to_numpy(dtype=float)
-    total = adata.obs["total_counts"].to_numpy(dtype=float)
-    fraction = np.clip((total_mt + 1.0) / (total + 2.0), 1e-6, 1.0 - 1e-6)
-    adata.obs["logit_mt_fraction"] = logit(fraction)
+    adata.obs["log1p_pct_counts_mt"] = np.log1p(adata.obs["pct_counts_mt"].to_numpy(dtype=float))
     labels = _sample_labels(adata, sample_key)
     outlier = np.zeros(adata.n_obs, dtype=bool)
     percent = None if max_pct_mt is None else float(max_pct_mt)
@@ -775,12 +768,12 @@ def _filter_qc(
             rule["nmads"] = float(scale)
             rules.append(rule)
             batch_outlier |= hit
-        logit_values = adata.obs["logit_mt_fraction"].to_numpy()[mask]
-        mt_rule, mt_hit = _mad_rule(logit_values, _MT_NMADS, upper=True)
+        mt_values = adata.obs["log1p_pct_counts_mt"].to_numpy()[mask]
+        mt_rule, mt_hit = _mad_rule(mt_values, _MT_NMADS, upper=True)
         pct = adata.obs["pct_counts_mt"].to_numpy()[mask]
         above_min = pct > _MT_MIN_PCT
         mt_removed = mt_hit & above_min
-        mt_rule["metric"] = "logit_mt_fraction"
+        mt_rule["metric"] = "log1p_pct_counts_mt"
         mt_rule["side"] = "upper"
         mt_rule["nmads"] = float(_MT_NMADS)
         mt_rule["min_pct"] = float(_MT_MIN_PCT)
@@ -1285,19 +1278,17 @@ def _qc_label(metric: str) -> str:
     if metric.startswith("pct_counts_in_top_") and metric.endswith("_genes"):
         n = metric.removeprefix("pct_counts_in_top_").removesuffix("_genes")
         return f"percent counts in top {n} genes"
-    if metric == "logit_mt_fraction":
+    if metric == "log1p_pct_counts_mt":
         return "mitochondrial percent"
     return metric
 
 
 def _on_count_scale(metric: str, value: float | None) -> float | None:
-    """log1p cutoffs become UMI or gene counts. The mito logit becomes a percent."""
+    """log1p cutoffs become UMI or gene counts. The mito log1p becomes a percent."""
     if value is None or not np.isfinite(value):
         return None
     if metric.startswith("log1p_"):
         return float(np.expm1(value))
-    if metric == "logit_mt_fraction":
-        return float(100.0 * expit(value))
     return float(value)
 
 
@@ -1305,11 +1296,11 @@ def _fmt_threshold(metric: str, value: float | None) -> str:
     scaled = _on_count_scale(metric, value)
     if scaled is None:
         return "none"
-    if metric.startswith("log1p_"):
-        return f"{int(round(scaled)):,}"
-    if metric.startswith("pct_") or metric == "logit_mt_fraction":
+    if metric == "log1p_pct_counts_mt" or metric.startswith("pct_"):
         text = f"{scaled:.1f}"
         return text[:-2] if text.endswith(".0") else text
+    if metric.startswith("log1p_"):
+        return f"{int(round(scaled)):,}"
     return _fmt(scaled)
 
 
@@ -1319,7 +1310,7 @@ def _format_rule(rule: dict) -> str:
     removed = _count(rule["n_removed"])
     if not np.isfinite(rule["mad"]) or rule["mad"] == 0:
         return f"{label}: no cutoff, {removed} removed"
-    if metric == "logit_mt_fraction":
+    if metric == "log1p_pct_counts_mt":
         high = _fmt_threshold(metric, rule["high"])
         floor = _fmt(rule["min_pct"])
         return f"{label}: {high} and {floor}, {removed} removed"

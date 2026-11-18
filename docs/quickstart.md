@@ -81,9 +81,9 @@ records the gene count, the principal-component elbow, and the resolution.
 Thresholds are fit within each sample (`batch_key`, or `obs["sample"]` when
 that column exists). For log1p total counts, log1p gene count, and the share of
 counts in the top 20 genes, the cutoff is 5 median absolute deviations on both
-sides (`nmads`). For mitochondrial share it is 3 on the upper side of the
-logit, and the share must also exceed 8%. Ribosomal and hemoglobin shares are
-recorded and not used to filter. `max_pct_mt` adds a hard cap in percent (10
+sides (`nmads`). For mitochondrial share it is 3 on the upper side of
+log1p(percent), and the share must also exceed 8%. Ribosomal and hemoglobin
+shares are recorded and not used to filter. `max_pct_mt` adds a hard cap in percent (10
 means 10%). With `show=True`, `prepare` prints each sample's cutoffs in counts
 and percent.
 
@@ -213,12 +213,14 @@ panel, not to each gene separately.
 - `review`: clusters that still need a look. The order is not an accuracy
   score.
 - `annotation_code`: an editable cluster mapping, `fine_order`, a `marker_dict`,
-  and UMAP and dotplot calls. Edit the order or labels and rerun the snippet to
-  regenerate the plots.
+  and UMAP and dotplot calls. `drop_clusters` removes one or more clusters
+  before those plots. Edit the order, the labels, or that list and rerun the
+  snippet to regenerate the plots.
 
 {doc}`tutorials/report` explains every report field. The printed `Queries`
 block is text to paste into another model. The heading is the local note.
-The paragraph under it is the question.
+The paragraph under it is the question. A split adds one block per child,
+with the marker judgment and the genes enriched against the other cells.
 
 A Cell Ontology id is the exact map row for the written label. An unreviewed id
 is marked pending.
@@ -273,10 +275,11 @@ record's `final_reason` says why the title was written or withheld.
 
 - `no_marker_passed`: none of the name's cited markers passed the expression
   check. The name stays, the hint reads `no marker passed`, and the dotplot
-  shows the best-measured cited genes. If the marker call is a different name
-  that did pass, that name is written instead. An unchecked marker call is
-  tried once. If it fails, and the name and ML models agree on another
-  lineage, that agreed name is written instead.
+  shows the best-measured cited genes. When the name and ML models already
+  agree on that name, a different marker call does not replace it. Otherwise
+  a marker call that passed is written, and an unchecked marker call is tried
+  once. If that call fails, and the two models agree on another lineage, that
+  agreed name is written instead.
 - `mixed_programs`: a cluster under 40 cells shows two programs. It is named
   only when the marker score, name model, and ML model give the same name. The
   hint lists the programs. Otherwise the cluster stays unnamed.
@@ -286,6 +289,11 @@ record's `final_reason` says why the title was written or withheld.
   when the marker rule wrote it without a hint. A name a model already wrote on
   the same lineage stays, and the hint names the neighboring cluster. A cluster
   that touches two lineages is not renamed.
+- `low_quality`: a cluster is removed only when it has no title of its own
+  and at least half of its 20 leading enriched genes are ribosomal
+  proteins detected in at least 70% of the other cells. The hint is
+  `ribosomal genes only`. A missing title does not remove a cluster. A high
+  ribosomal count share does not remove a cluster that already has a title.
 
 `report["queue"]` lists clusters that still have at least one cell without a
 title. A cluster whose cells are all named, including by a subcluster split,
