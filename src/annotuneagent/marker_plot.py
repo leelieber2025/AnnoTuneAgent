@@ -163,10 +163,21 @@ def plot_marker_panels(
         show=False,
         return_fig=True,
     )
+    _square_dot_cells(plot)
     if path is None:
-        plot.show()
+        import matplotlib.pyplot as plt
+
+        plt.show()
         return None
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    plot.savefig(str(target))
+    plot.fig.savefig(str(target), bbox_inches="tight")
     return str(target)
+
+
+def _square_dot_cells(plot) -> None:
+    """Keep each gene-by-type cell square so the saved figure is not stretched."""
+    plot.make_figure()
+    ax = plot.ax_dict.get("mainplot_ax")
+    if ax is not None:
+        ax.set_aspect("equal", adjustable="box")

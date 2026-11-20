@@ -1662,11 +1662,14 @@ def annotation_code(
                 "# Keep marker columns in the same order as the cell type rows.",
                 "ordered_marker_dict = {name: marker_dict[name] for name in fine_order if name in marker_dict}",
                 "if ordered_marker_dict and adata.obs['celltype'].notna().any():",
-                "    sc.pl.dotplot(",
+                "    dotplot = sc.pl.dotplot(",
                 "        adata[adata.obs['celltype'].notna()].copy(), ordered_marker_dict,",
                 "        groupby='celltype', categories_order=fine_order,",
                 "        dendrogram=False, use_raw=False, standard_scale='var',",
+                "        show=False, return_fig=True,",
                 "    )",
+                "    dotplot.make_figure()",
+                "    dotplot.ax_dict['mainplot_ax'].set_aspect('equal', adjustable='box')",
             ]
         )
     lines.append("")

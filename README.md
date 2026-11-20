@@ -18,7 +18,8 @@ language model runs locally, and a check rule reads the marker measurements.**
 
 Each cluster gets a marker score and a name-model result. The check rule
 keeps that name, replaces it, or drops it. The marker score can still name
-the cluster when the check drops the proposal. Every call stays auditable.
+the cluster when the check drops the proposal. The report keeps the name,
+the check result, and the reason.
 
 ## What is fine-tuned
 
@@ -60,18 +61,17 @@ raw counts ─ prepare ─▶ QC, doublets, normalization, batch correction, Lei
                         validated marker panels, dotplot, report, annotated h5ad
 ```
 
-- **A rule, not a second model.** The check reads the measurements. It does
-  not call another adapter. Mixed programs and unvalidated names stay flagged
-  (`mixed_programs`, `near_clear_cluster`, `subcluster_labels`,
-  `no_marker_passed`, `check_rule`) so you can review them.
-- **Marker evidence is checked, not quoted.** Panels are selected from cited
-  dictionary markers and validated against measured expression and
-  specificity in your data.
-- **Every title is traceable.** The report records the name-model answer, the
-  check result, the panel, and the reason a cluster was or was not settled.
+- The check reads the measurements. Mixed programs and names that fail the
+  marker check stay flagged (`mixed_programs`, `near_clear_cluster`,
+  `subcluster_labels`, `no_marker_passed`, `check_rule`).
+- Panels come from cited dictionary markers. A gene stays on the plot when
+  it is enriched in that label and specific against the other labels.
+- The report stores the name-model answer, the check result, the panel, and
+  the reason.
 
-The name model runs when `models` is passed (or `--name-adapter` / `--name-url`
-is given). Without it, `run` uses the marker score alone.
+The name model runs when `models` is passed, or when the command line sets
+`--base`, `--name-url`, or `--name-adapter`. Without that, `run` uses the
+marker score alone.
 
 ## Install
 

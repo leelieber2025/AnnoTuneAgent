@@ -9,6 +9,8 @@ All notable changes to this project are documented in this file.
 - Document the Bioconda install. README and docs show PyPI, Bioconda, and
   combined download badges. The total is refreshed weekly on the `badges`
   branch.
+- The load-model tutorial downloads the one merged GGUF. Marker dot plots
+  use square cells.
 
 - A check-accepted fibroblast, smooth muscle cell, macrophage, or monocyte
   yields when the marker score names a program-specific type on another

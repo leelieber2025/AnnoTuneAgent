@@ -50,7 +50,7 @@ Two mouse calvarial 10x samples
 
 Run a local server at `http://127.0.0.1:8080`, or connect to a remote one.
 +++
-Needs GGUF files or a running server
+One merged GGUF, or a server that already has it loaded
 :::
 
 :::{grid-item-card} Read the report

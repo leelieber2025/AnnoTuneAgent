@@ -18,8 +18,8 @@ proposal. A cluster can stay unnamed. Clusters with the same title are merged.
 
 The name model is one merged Q6_K GGUF, `Qwen3.5-4B-annotune-v9k-name.Q6_K.gguf`.
 It runs locally and copies
-a name from the marker dictionary hits (`dictionary_hits`). The check is not
-a model. A positive marker supports a type when its log fold change is above
+a name from the marker dictionary hits (`dictionary_hits`). The check is a
+fixed rule. A positive marker supports a type when its log fold change is above
 0.5 and it is detected in at least 25% of the cluster. A negative marker
 blocks a type only when it is that common and its log fold change is at least
 1. The proposal stays when at least two markers support it and none block it.
