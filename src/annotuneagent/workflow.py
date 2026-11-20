@@ -184,7 +184,9 @@ def settle_cluster(
 
     Exact, ancestor, and descendant Cell Ontology relations are one lineage.
     Siblings are not. When ``check`` agrees or replaces, that name is written
-    and the marker score does not override it. When ``check`` drops the
+    and the marker score does not override it, unless the name is fibroblast,
+    smooth muscle cell, macrophage, or monocyte and the marker is a
+    program-specific type on another lineage. When ``check`` drops the
     proposal, the marker score can still name the cluster. A marker margin
     below ``min_margin`` does the same, unless name and
     ML agree on a descendant of the marker call: that descendant is written
@@ -326,8 +328,11 @@ def settle_cluster(
     }
     if check is not None and check.get("name") and check.get("action") in {"agree", "replace"}:
         settled["check_name"] = str(check["name"])
+    if marker:
+        settled["marker_name"] = marker
     _guard_written_label(settled, species=species, dag=dag, label_map=label_map)
     settled.pop("check_name", None)
+    settled.pop("marker_name", None)
     settled.pop("ranking", None)
     settled.pop("evidence", None)
     return settled
@@ -348,7 +353,15 @@ def _choose_label(
 ) -> tuple[str | None, list[str], bool]:
     close = bool(ranking) and len(ranking) >= 2 and margin is not None and margin < min_margin
     if check is not None and check.get("action") in {"agree", "replace"} and check.get("name"):
-        return str(check["name"]), [], close
+        chosen = str(check["name"])
+        marker_name = spoken.get("marker")
+        specific = _marker_past_broad_type(chosen, marker_name, ranking, species, dag, label_map)
+        if specific:
+            return specific, [], close
+        off = _marker_when_agreed_program_is_off(
+            chosen, marker_name, ranking, species, dag, label_map
+        )
+        return off or chosen, [], close
     if check is not None:
         spoken = {"marker": spoken.get("marker"), "name": None, "ml": None}
     items = [(key, spoken[key]) for key in ("marker", "name", "ml") if spoken[key]]
@@ -410,6 +423,50 @@ def _choose_label(
     if child:
         chosen = child
     return chosen, _outside(components, chosen), close
+
+
+# Parents that share genes with more specific types on other lineages.
+_BROAD_TYPES = frozenset({"fibroblast", "smooth muscle cell", "macrophage", "monocyte"})
+
+
+def _marker_past_broad_type(label, marker, ranking, species, dag, label_map) -> str | None:
+    """Use a specific marker when a broad title is on another lineage.
+
+    The broad titles are fibroblast, smooth muscle cell, macrophage, and
+    monocyte. The marker has to be program-specific. A more specific
+    descendant replaces the broad title. Another broad title does not.
+    """
+    if not label or not marker or str(marker) == str(label):
+        return None
+    if str(label) not in _BROAD_TYPES or str(marker) in _BROAD_TYPES:
+        return None
+    if not any(
+        row.get("name") == marker and row.get("program_specific") is True for row in ranking or []
+    ):
+        return None
+    if _is_descendant(str(marker), str(label), species, dag, label_map):
+        return str(marker)
+    if _same_lineage(str(label), str(marker), species, dag, label_map):
+        return None
+    return str(marker)
+
+
+def _marker_when_agreed_program_is_off(
+    label, marker, ranking, species, dag, label_map
+) -> str | None:
+    """Use a specific marker on another lineage when the agreed program is off."""
+    if not label or not marker or str(marker) == str(label):
+        return None
+    if _same_lineage(str(label), str(marker), species, dag, label_map):
+        return None
+    if not any(
+        row.get("name") == marker and row.get("program_specific") is True for row in ranking or []
+    ):
+        return None
+    agreed = next((row for row in ranking or [] if row.get("name") == label), None)
+    if agreed is not None and agreed.get("program_on") is True:
+        return None
+    return str(marker)
 
 
 _CD4 = "CD4-positive, alpha-beta T cell"
@@ -733,6 +790,46 @@ def _label_is_specific(label, ranking) -> bool:
     )
 
 
+def _keep_gap_name(record: dict, label: str, unexplained) -> None:
+    """Keep ``label`` and list genes the dictionary did not cover."""
+    record["written_label"] = label
+    note = _unexplained_hint(unexplained)
+    previous = record.get("hint")
+    if previous and note not in str(previous):
+        record["hint"] = f"{previous}; {note}"
+    elif not previous:
+        record["hint"] = note
+
+
+def _marker_call(record: dict) -> str | None:
+    saved = record.get("marker_name")
+    if saved:
+        return str(saved)
+    if record.get("status") == "label" and record.get("cell_type"):
+        return str(record["cell_type"])
+    return None
+
+
+def _name_and_marker_name(record: dict, species, dag, label_map) -> str | None:
+    """Finer name when the name model and the marker score are one lineage.
+
+    An ML call on another lineage cancels the agreement. The ML model is not
+    required when it did not run.
+    """
+    name = _proposal_name(record, "name")
+    marker = _marker_call(record)
+    if not name or not marker:
+        return None
+    ml = _proposal_name(record, "ml")
+    if ml and not _same_lineage(ml, name, species, dag, label_map):
+        return None
+    if name != marker and not _same_lineage(name, marker, species, dag, label_map):
+        return None
+    if name != marker and _is_descendant(marker, name, species, dag, label_map):
+        return marker
+    return name
+
+
 def _unexplained_hint(genes) -> str:
     names = [str(gene) for gene in genes or [] if str(gene)]
     if not names:
@@ -766,8 +863,10 @@ def _guard_written_label(record: dict, *, species=None, dag=None, label_map=None
     ``evidence_agreement`` that is not program-specific stays written. The
     hint is ``weak agreement on {label}``. When no candidate panel is detected
     in the majority, the name is removed and the hint lists the unexplained
-    genes. The name stays when the name model and the ML model are one lineage.
-    The hint still lists those genes, and the reason is ``model_agreement``.
+    genes. A name the check rule accepted stays, and those genes are still
+    listed. The name also stays when the name model and the ML model are one
+    lineage. The hint still lists those genes, and the reason is
+    ``model_agreement``.
     Endothelial cell stays written when the other call is pericyte and the
     enriched genes support endothelium. A one-gene panel cannot be specific,
     so that agreement is left unchanged. Presence is not read here. Returns
@@ -785,6 +884,14 @@ def _guard_written_label(record: dict, *, species=None, dag=None, label_map=None
     if _dictionary_gap(ranking):
         checked = _checked_name(record)
         if checked and _same_lineage(checked, label, species, dag, label_map):
+            _keep_gap_name(record, label, unexplained)
+            return False
+        paired = _name_and_marker_name(record, species, dag, label_map)
+        if paired and _same_lineage(paired, label, species, dag, label_map):
+            _keep_gap_name(record, paired, unexplained)
+            record["final_status"] = "review"
+            record["final_reason"] = "model_agreement"
+            record["arbitration"] = True
             return False
         if _prefer_endothelial(record, unexplained):
             record["written_label"] = "endothelial cell"
@@ -2490,7 +2597,7 @@ def _flag_labels_without_markers(
             marker
             and marker != label
             and (marker_passed or marker_untried)
-            and not checked_on_label
+            and not (checked_on_label and not program_yields)
             and not (agreed_on_label and not program_yields)
         ):
             changed = True

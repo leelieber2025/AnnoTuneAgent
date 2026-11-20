@@ -45,8 +45,8 @@ def test_mouse_symbols_are_not_human_copies():
     assert rpe.positive == ("Rpe65", "Lrat")
     assert "Best1" not in rpe.positive
     c_cell = hypotheses_from_names(["parafollicular cell"], "mouse", "thyroid")[0]
-    assert c_cell.positive == ("Calca",)
-    assert c_cell.support == ("Chga",)
+    assert c_cell.positive == ("Calca", "Chga")
+    assert c_cell.support == ()
 
 
 def test_tissue_type_requires_tissue():
@@ -126,6 +126,8 @@ def test_author_drg_offers_the_drg_page():
         ("testicular biopsy", "human", "testis"),
         ("breast tissue", "human", "mammary"),
         ("thymic stroma", "human", "thymus"),
+        ("tongue", "mouse", "skin"),
+        ("large intestine", "mouse", "intestine"),
     ],
 )
 def test_common_author_tissue_aliases(author, species, page):
@@ -229,6 +231,62 @@ def test_limb_schwann_uses_mog_not_plp1_as_the_oligodendrocyte_negative():
     assert mouse.negative == ("Mog", "Ptprc")
     assert "PLP1" not in human.negative
     assert "Plp1" not in mouse.negative
+
+
+def test_panels_have_two_positive_markers_except_human_renin_cells():
+    from annotuneagent.markers import load_entries
+
+    short = [
+        (entry.species, entry.cell_type, entry.positive)
+        for entry in load_entries()
+        if len(entry.positive) < 2
+    ]
+    assert short == [("human", "juxtaglomerular granular cell", ("REN",))]
+
+
+def test_prostate_basal_includes_keratins_detected_when_tp63_is_sparse():
+    human = hypotheses_from_names(["basal cell of prostate epithelium"], "human", "prostate")[0]
+    mouse = hypotheses_from_names(["basal cell of prostate epithelium"], "mouse", "prostate")[0]
+    assert {"KRT5", "KRT14", "KRT15", "TP63"} <= set(human.positive)
+    assert {"Krt5", "Krt14", "Krt15", "Trp63"} <= set(mouse.positive)
+
+
+def test_mammary_basal_keratins_are_not_smooth_muscle():
+    human = hypotheses_from_names(
+        ["basal-myoepithelial cell of mammary gland"], "human", "mammary"
+    )[0]
+    mouse = hypotheses_from_names(
+        ["basal-myoepithelial cell of mammary gland"], "mouse", "mammary"
+    )[0]
+    assert {"KRT5", "KRT14", "ACTA2"} <= set(human.positive)
+    assert {"Krt5", "Krt14", "Acta2"} <= set(mouse.positive)
+    assert "KRT14" in hypotheses_from_names(["smooth muscle cell"], "human")[0].negative
+    assert "Krt14" in hypotheses_from_names(["smooth muscle cell"], "mouse")[0].negative
+    luminal = hypotheses_from_names(
+        ["luminal epithelial cell of mammary gland"], "human", "mammary"
+    )[0]
+    assert {"KRT8", "KRT18", "KRT19"} <= set(luminal.positive)
+
+
+def test_superficial_chondrocytes_do_not_require_col2a1():
+    human = hypotheses_from_names(["superficial zone articular chondrocyte"], "human", "cartilage")[
+        0
+    ]
+    mouse = hypotheses_from_names(["superficial zone articular chondrocyte"], "mouse", "cartilage")[
+        0
+    ]
+    assert {"PRG4", "SFRP1"} <= set(human.positive)
+    assert {"Prg4", "Sfrp1"} <= set(mouse.positive)
+    assert "PRG4" in hypotheses_from_names(["LYVE1+ resident macrophage"], "human")[0].negative
+
+
+def test_nonkeratinized_squamous_markers_are_on_the_core_page():
+    human = hypotheses_from_names(["stratified squamous epithelial cell"], "human")[0]
+    mouse = hypotheses_from_names(["stratified squamous epithelial cell"], "mouse")[0]
+    assert human.positive == ("KRT4", "KRT13")
+    assert mouse.positive == ("Krt4", "Krt13")
+    assert "stratified squamous epithelial cell" in marker_names("human")
+    assert "stratified squamous epithelial cell" in marker_names("mouse", "skin")
 
 
 def test_eosinophil_uses_species_specific_positive_markers():

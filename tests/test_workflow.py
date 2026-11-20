@@ -1016,6 +1016,256 @@ def test_model_agreement_keeps_the_finer_name_when_no_panel_is_on():
     assert "GJA5" in settled["hint"]
 
 
+def test_broad_smooth_muscle_yields_to_a_specific_marker():
+    basal = "basal-myoepithelial cell of mammary gland"
+    settled = settle_cluster(
+        marker=basal,
+        name="smooth muscle cell",
+        ml=None,
+        added=[],
+        cells=7435,
+        species="mouse",
+        ranking=[
+            {
+                "name": basal,
+                "score": 2.0,
+                "program_on": True,
+                "program_specific": True,
+                "n_positive": 2,
+            },
+            {
+                "name": "smooth muscle cell",
+                "score": 1.0,
+                "program_on": True,
+                "program_specific": False,
+                "n_positive": 5,
+            },
+        ],
+        marker_labeled=True,
+        check={"action": "agree", "name": "smooth muscle cell"},
+    )
+    assert settled["written_label"] == basal
+    assert settled["final_reason"] == "check_rule"
+
+
+def test_broad_fibroblast_yields_to_theca_and_not_to_smooth_muscle():
+    theca = settle_cluster(
+        marker="theca cell",
+        name="fibroblast",
+        ml=None,
+        added=[],
+        cells=3390,
+        species="human",
+        ranking=[
+            {
+                "name": "theca cell",
+                "score": 1.4,
+                "program_on": True,
+                "program_specific": True,
+                "n_positive": 2,
+            },
+            _absent("fibroblast", 0.4),
+        ],
+        marker_labeled=True,
+        check={"action": "agree", "name": "fibroblast"},
+    )
+    assert theca["written_label"] == "theca cell"
+    muscle = settle_cluster(
+        marker="smooth muscle cell",
+        name="fibroblast",
+        ml=None,
+        added=[],
+        cells=115,
+        species="mouse",
+        ranking=[
+            {
+                "name": "smooth muscle cell",
+                "score": 1.4,
+                "program_on": True,
+                "program_specific": True,
+                "n_positive": 5,
+            },
+            {
+                "name": "fibroblast",
+                "score": 1.0,
+                "program_on": True,
+                "program_specific": False,
+                "n_positive": 5,
+            },
+        ],
+        marker_labeled=True,
+        check={"action": "agree", "name": "fibroblast"},
+    )
+    assert muscle["written_label"] == "fibroblast"
+
+
+def test_skeletal_myoblast_replaces_a_broad_smooth_muscle_title():
+    settled = settle_cluster(
+        marker="skeletal muscle myoblast",
+        name="skeletal muscle myoblast",
+        ml=None,
+        added=[],
+        cells=2060,
+        species="mouse",
+        ranking=[
+            {
+                "name": "skeletal muscle myoblast",
+                "score": 1.5,
+                "program_on": True,
+                "program_specific": True,
+                "n_positive": 2,
+            },
+            {
+                "name": "smooth muscle cell",
+                "score": 1.0,
+                "program_on": True,
+                "program_specific": False,
+                "n_positive": 5,
+            },
+        ],
+        marker_labeled=True,
+        check={"action": "replace", "name": "smooth muscle cell"},
+    )
+    assert settled["written_label"] == "skeletal muscle myoblast"
+
+
+def test_check_agreement_keeps_plasma_cell():
+    settled = settle_cluster(
+        marker="plasmablast",
+        name="plasma cell",
+        ml=None,
+        added=[],
+        cells=110,
+        species="human",
+        ranking=[
+            {
+                "name": "plasmablast",
+                "score": 1.2,
+                "program_on": True,
+                "program_specific": True,
+                "n_positive": 3,
+            },
+            {
+                "name": "plasma cell",
+                "score": 1.0,
+                "program_on": True,
+                "program_specific": True,
+                "n_positive": 3,
+            },
+        ],
+        marker_labeled=True,
+        check={"action": "agree", "name": "plasma cell"},
+    )
+    assert settled["written_label"] == "plasma cell"
+    assert settled["final_reason"] == "check_rule"
+    assert settled["hint"] is None
+
+
+def test_check_agreement_keeps_a_name_the_dictionary_does_not_detect():
+    settled = settle_cluster(
+        marker=None,
+        name="basal cell of prostate epithelium",
+        ml=None,
+        added=[],
+        cells=3740,
+        species="human",
+        ranking=[_absent("basal cell of prostate epithelium", 0.2)],
+        unexplained=["KRT15", "HSPA1B"],
+        check={"action": "agree", "name": "basal cell of prostate epithelium"},
+    )
+    assert settled["written_label"] == "basal cell of prostate epithelium"
+    assert settled["final_status"] == "named"
+    assert settled["final_reason"] == "check_rule"
+    assert settled["hint"] == "unexplained: KRT15, HSPA1B"
+
+
+def test_a_name_check_did_not_accept_is_still_outside_the_dictionary():
+    settled = settle_cluster(
+        marker=None,
+        name="mesothelial cell",
+        ml=None,
+        added=[],
+        cells=469,
+        species="human",
+        ranking=[_absent("mesothelial cell", 0.4)],
+        unexplained=["AZGP1"],
+        check={"action": "escalate", "name": None},
+    )
+    assert settled["written_label"] is None
+    assert settled["final_reason"] == "check_rule"
+
+
+def test_name_and_marker_agreement_survives_a_dictionary_gap():
+    settled = settle_cluster(
+        marker="basal cell of prostate epithelium",
+        name="basal cell of prostate epithelium",
+        ml=None,
+        added=[],
+        cells=4841,
+        species="human",
+        ranking=[_absent("basal cell of prostate epithelium", 0.2)],
+        unexplained=["KRT15", "DST"],
+        check={"action": "escalate", "name": None},
+    )
+    assert settled["written_label"] == "basal cell of prostate epithelium"
+    assert settled["final_reason"] == "model_agreement"
+    assert settled["hint"] == "unexplained: KRT15, DST"
+
+
+def test_broad_parent_yields_to_a_specific_descendant():
+    settled = settle_cluster(
+        marker="alveolar fibroblast",
+        name="fibroblast",
+        ml=None,
+        added=[],
+        cells=1493,
+        species="mouse",
+        ranking=[
+            {
+                "name": "alveolar fibroblast",
+                "score": 1.4,
+                "program_on": True,
+                "program_specific": True,
+                "n_positive": 4,
+            },
+            {
+                "name": "fibroblast",
+                "score": 1.0,
+                "program_on": True,
+                "program_specific": False,
+                "n_positive": 5,
+            },
+        ],
+        marker_labeled=True,
+        check={"action": "agree", "name": "fibroblast"},
+    )
+    assert settled["written_label"] == "alveolar fibroblast"
+
+
+def test_check_agreement_yields_when_its_program_is_off():
+    settled = settle_cluster(
+        marker="non-classical monocyte",
+        name="alveolar macrophage",
+        ml=None,
+        added=[],
+        cells=1025,
+        species="mouse",
+        ranking=[
+            {
+                "name": "non-classical monocyte",
+                "score": 1.2,
+                "program_on": True,
+                "program_specific": True,
+                "n_positive": 4,
+            },
+            _absent("alveolar macrophage", 0.2),
+        ],
+        marker_labeled=True,
+        check={"action": "agree", "name": "alveolar macrophage"},
+    )
+    assert settled["written_label"] == "non-classical monocyte"
+
+
 def test_disagreeing_models_still_drop_a_name_outside_the_dictionary():
     settled = settle_cluster(
         marker="B cell",
@@ -1304,7 +1554,7 @@ def test_mural_child_stays_unlabeled_when_both_programs_are_specific(monkeypatch
     assert int(labels.iloc[:80].isna().sum()) == 0
     parent = next(row for row in report["records"] if row["cluster"] == "0")
     assert parent["written_label"] == "endothelial cell"
-    assert parent["final_reason"] == "evidence_conflict"
+    assert parent["final_reason"] == "check_rule"
     assert "0.0" not in {row["cluster"] for row in report["clusters"]}
 
 

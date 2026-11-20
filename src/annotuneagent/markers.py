@@ -30,6 +30,7 @@ _AUTHOR_TISSUE = (
     ("ovarian", "ovary"),
     ("testicular", "testis"),
     ("breast", "mammary"),
+    ("tongue", "skin"),
 )
 
 
@@ -135,6 +136,7 @@ def suggest_tissues(author: str, species: str | None = None) -> list[str]:
 
     The caller chooses one and passes it to ``run``. An unmatched phrase
     returns every page. Dorsal root ganglion returns the ``drg`` page.
+    Tongue returns the skin page. Large intestine matches the intestine page.
     """
     pages = tissue_pages(species)
     text = " ".join(author.casefold().replace("_", " ").replace("-", " ").split())

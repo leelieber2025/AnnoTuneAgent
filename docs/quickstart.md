@@ -279,8 +279,17 @@ written or withheld. Those fields stay on the report.
 - `no_marker_passed`: none of the name's cited markers passed the expression
   check. The name stays, the hint reads `no marker passed`, and the dotplot
   shows the best-measured cited genes. When the check rule kept that name, a
-  different marker call does not replace it. Otherwise a marker call that
+  different marker call does not replace it, unless the kept name is
+  fibroblast, smooth muscle cell, macrophage, or monocyte and the marker is
+  a program-specific type on another lineage. Otherwise a marker call that
   passed is written, and an unchecked marker call is tried once.
+- A name the check rule accepted stays when no dictionary panel is detected
+  in the majority of the cluster. The same is true when the name model and
+  the marker score already agree, unless an ML call is on another lineage.
+  The hint lists the enriched genes that are not in those panels. A
+  check-accepted fibroblast, smooth muscle cell, macrophage, or monocyte
+  yields to a program-specific descendant. Any check-accepted name yields
+  to a program-specific marker on another lineage when its own program is off.
 - `mixed_programs`: a cluster under 40 cells shows two programs. It stays
   unnamed. The hint lists the programs.
 - `near_clear_cluster`: a cluster with an unclear name takes the title of the

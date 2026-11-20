@@ -157,7 +157,7 @@ def test_cli_prepare_prints_install_line_when_scvi_is_missing(tmp_path: Path, mo
     "scope, cell_type, positives",
     [
         ("adipose", "adipocyte", ["ADIPOQ", "PLIN1", "FABP4"]),
-        ("tendon", "tenocyte", ["SCX", "MKX", "TNMD"]),
+        ("tendon", "tenocyte", ["SCX", "COMP", "CILP"]),
         ("stomach", "foveolar cell", ["MUC5AC", "GKN1", "TFF1"]),
         ("cartilage", "chondrocyte", ["COL2A1", "ACAN", "SOX9"]),
         ("thyroid", "thyroid follicular cell", ["TG", "TPO"]),
