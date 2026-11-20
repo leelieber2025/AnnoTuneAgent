@@ -1,11 +1,11 @@
 # Copyright 2026 Zhao Li (李钊)
 # Licensed under the Apache License, Version 2.0
 
-"""One Q6_K base, two LoRA adapters, one enabled per request.
+"""Load one GGUF and send completion requests.
 
-llama-server loads name and ml together and leaves them off.
-A request sets that task's scale to 1 and the other to 0. Sequences
-past ``maxlen`` raise. They are not truncated.
+A merged name file is loaded with ``-m`` and no LoRA. A base plus a name
+adapter uses ``--lora``. Sequences past ``maxlen`` raise. They are not
+truncated.
 """
 
 from __future__ import annotations
@@ -236,25 +236,27 @@ def attach(url: str | None = None, *, tokenizer: str | None = None) -> str:
     return target
 
 
+# ML prompts reach about 8000 tokens. The reply also uses this window.
+CONTEXT = 10240
+
+
 def open_adapters(
     adapters: dict[str, str],
     *,
     gguf: str,
     tokenizer: str | None = None,
-    ctx: int = 8192,
+    ctx: int = CONTEXT,
     url: str | None = None,
 ) -> None:
-    """Use the server at ``url``, or load one base and two adapters there.
+    """Use the server at ``url``, or load one base and the name adapter there.
 
     A server that is already up is reused. This does not start a second one.
     """
     global _SERVER
     target = _base_url(url) if url else service_url()
     tokenizer = _tokenizer_dir(tokenizer)
-    missing = [name for name in _TASKS if not adapters.get(name)]
-    if missing:
-        raise ValueError(f"shared base needs adapters for {', '.join(missing)}")
-    paths = {name: str(Path(adapters[name]).resolve()) for name in _TASKS}
+    tasks = [name for name in _TASKS if adapters.get(name)]
+    paths = {name: str(Path(adapters[name]).resolve()) for name in tasks}
     base = str(Path(gguf).resolve())
     if _server_live() and _SERVER.get("url") == target:
         loaded = _SERVER
@@ -292,30 +294,32 @@ def open_adapters(
     binary = _binary()
     _private_dir(_LOG.parent)
     log = _LOG.open("w")
-    proc = subprocess.Popen(
-        [
-            binary,
-            "-m",
-            base,
+    command = [binary, "-m", base]
+    if tasks:
+        command += [
             "--lora",
-            ",".join(paths[name] for name in _TASKS),
+            ",".join(paths[name] for name in tasks),
             "--lora-init-without-apply",
-            "-c",
-            str(ctx),
-            "-ngl",
-            "99",
-            "-np",
-            "1",
-            "--no-cont-batching",
-            "--no-cache-prompt",
-            "--slot-prompt-similarity",
-            "0",
-            "--no-jinja",
-            "--host",
-            host,
-            "--port",
-            str(port),
-        ],
+        ]
+    command += [
+        "-c",
+        str(ctx),
+        "-ngl",
+        "99",
+        "-np",
+        "1",
+        "--no-cont-batching",
+        "--no-cache-prompt",
+        "--slot-prompt-similarity",
+        "0",
+        "--no-jinja",
+        "--host",
+        host,
+        "--port",
+        str(port),
+    ]
+    proc = subprocess.Popen(
+        command,
         stdout=log,
         stderr=subprocess.STDOUT,
         env=_child_env(binary),
@@ -363,8 +367,11 @@ def complete(task: str, system: str, payload: dict | str, *, maxlen: int) -> str
         evaluated = None
         predicted = None
     else:
-        ids = None if runtime.get("owned") else _adapter_ids(runtime["url"])
-        scales = scales_for(task, ids)
+        if runtime.get("adapters"):
+            ids = None if runtime.get("owned") else _adapter_ids(runtime["url"])
+            scales = scales_for(task, ids)
+        else:
+            scales = []
         text, evaluated, predicted = _completion(runtime["url"], prompt, scales)
     global _LAST
     _LAST = {
@@ -711,14 +718,25 @@ def _described_server(url: str) -> dict | None:
             continue
         ordered.append((index, str(item.get("path") or "")))
     ordered.sort()
-    if not gguf or [index for index, _path in ordered] != [0, 1]:
+    indexes = [index for index, _path in ordered]
+    if not gguf or indexes not in ([], [0], [0, 1]):
         return None
+    if not indexes:
+        found = {}
+    elif indexes == [0, 1]:
+        found = dict(zip(_TASKS, (path for _index, path in ordered), strict=True))
+    else:
+        filename = re.split(r"[\\/]", ordered[0][1])[-1].lower()
+        tokens = set(re.split(r"[^a-z0-9]+", filename))
+        if "name" not in tokens:
+            return None
+        found = {"name": ordered[0][1]}
     _host, port = _split_host(url)
     return {
         "port": port,
         "url": url,
         "gguf": gguf,
-        "adapters": dict(zip(_TASKS, (path for _index, path in ordered), strict=True)),
+        "adapters": found,
         "ctx": ctx,
     }
 
@@ -752,9 +770,15 @@ def _loaded_servers() -> list[dict]:
         url = f"http://{host}:{port}"
         if not _health_ok(url):
             continue
-        # Both "--lora a,b" and "--lora a --lora b" load two adapters in that order.
+        # "--lora a,b" and "--lora a --lora b" load adapters in that order.
+        # One file is the name adapter. Two files are name then ML.
         names = [part for value in _all_args(argv, "--lora") for part in value.split(",") if part]
-        adapters = dict(zip(_TASKS, names, strict=True)) if len(names) == 2 else {}
+        if len(names) == 2:
+            adapters = dict(zip(_TASKS, names, strict=True))
+        elif len(names) == 1 and "name" in set(re.split(r"[^a-z0-9]+", Path(names[0]).name.lower())):
+            adapters = {"name": names[0]}
+        else:
+            adapters = {}
         ctx_text = _arg(argv, "-c") or _arg(argv, "--ctx-size")
         ctx_text = ctx_text.strip() if ctx_text else ctx_text
         found.append(
@@ -937,7 +961,7 @@ def _completion(
             "top_p": 1,
             "min_p": 0,
             "cache_prompt": False,
-            "lora": scales,
+            **({"lora": scales} if scales else {}),
         },
         timeout=timeout,
     )

@@ -166,6 +166,7 @@ def test_open_local_passes_the_callers_tokenizer(monkeypatch):
         seen["adapters"] = adapters
         seen["gguf"] = gguf
         seen["tokenizer"] = tokenizer
+        seen["ctx"] = ctx
         seen["url"] = url
 
     monkeypatch.setattr("annotuneagent.local_lora.open_adapters", fake)
@@ -178,14 +179,15 @@ def test_open_local_passes_the_callers_tokenizer(monkeypatch):
     assert _open_local(chain) is True
     assert seen["gguf"] == "base.gguf"
     assert seen["tokenizer"] == "/tok"
-    assert seen["adapters"]["ml"] == "ml.gguf"
+    assert seen["adapters"] == {"name": "name.gguf"}
+    assert seen["ctx"] == 2048
 
 
 def test_open_local_rejects_mixed_callback_and_adapter():
     from annotuneagent.workflow import _open_local
 
     chain = ModelChain(
-        name=TaskEndpoint(ask=lambda payload: payload),
+        name=TaskEndpoint(ask=lambda payload: payload, adapter="name.gguf", base="base.gguf"),
         ml=TaskEndpoint(adapter="ml.gguf", base="base.gguf"),
     )
     with pytest.raises(ValueError, match="cannot be combined with ask callbacks"):
@@ -288,9 +290,8 @@ def test_same_written_name_merges_clusters():
     report = run(adata, "leiden", hypotheses=_hypotheses(), subcluster=False)
     assert report["merged"] == [{"name": "CD4 T", "cluster": "0", "members": ["0", "2"]}]
     same = adata.obs["leiden"].isin(["0", "2"])
-    assert set(adata.obs.loc[same, "annotune_cluster"]) == {"0"}
-    assert set(adata.obs.loc[adata.obs["leiden"] == "1", "annotune_cluster"]) == {"1"}
     assert set(adata.obs.loc[same, "annotune_label"]) == {"CD4 T"}
+    assert "annotune_cluster" not in adata.obs.columns
 
 
 def test_custom_hypotheses_do_not_claim_literature_markers(tmp_path, monkeypatch):
@@ -486,9 +487,7 @@ def test_model_escalate_keeps_an_accepted_split():
     assert set(adata.obs["annotune_label"].iloc[40:]) == {"CD4 T", "CD8 T"}
     assert adata.obs["annotune_label"].iloc[:40].isna().all()
     assert report["queue"] == ["0"]
-    assert set(adata.obs.loc[adata.obs["leiden"] == "1", "annotune_final_status"].astype(str)) == {
-        "named"
-    }
+    assert "annotune_final_status" not in adata.obs.columns
 
 
 def test_failed_subcluster_marker_keeps_the_label_and_flags_it(monkeypatch):
@@ -545,9 +544,7 @@ def test_label_without_a_passing_marker_is_written_and_flagged():
     assert by_cluster["0"]["written_label"] == "T cell"
     assert "no marker passed" in by_cluster["0"]["hint"]
     assert set(adata.obs["annotune_label"].dropna()) == {"T cell"}
-    assert set(adata.obs.loc[adata.obs["leiden"] == "0", "annotune_hint"]) == {
-        by_cluster["0"]["hint"]
-    }
+    assert "annotune_hint" not in adata.obs.columns
     assert report["queue"] == ["1"]
 
 
@@ -795,13 +792,9 @@ def test_model_retest_uses_training_payload_and_writes_the_name():
     assert seen and "dictionary_hits" in seen[0]
     cluster0 = next(row for row in report["records"] if row["cluster"] == "0")
     assert cluster0["written_label"] == "CD4 T"
-    assert cluster0["final_reason"] == "weak_agreement"
-    assert cluster0["hint"] == "weak agreement on CD4 T"
+    assert cluster0["final_reason"] == "check_rule"
+    assert cluster0["hint"] is None
     assert set(adata.obs["annotune_label"].iloc[:20].astype(str)) == {"CD4 T"}
-    assert any(
-        row["cluster"] == "0" and row["hint"] == "weak agreement on CD4 T"
-        for row in report["review"]
-    )
 
 
 def test_name_and_ml_both_run_with_their_own_payloads():
@@ -830,8 +823,8 @@ def test_name_and_ml_both_run_with_their_own_payloads():
         subcluster=False,
     )
     cluster0 = next(row for row in report["records"] if row["cluster"] == "0")
-    assert [step["step"] for step in cluster0["rounds"]] == ["name", "ml"]
-    assert calls == [("name", False, True), ("ml", False, True)]
+    assert [step["step"] for step in cluster0["rounds"]] == ["name", "check"]
+    assert calls == [("name", False, True)]
     assert adata.obs["annotune_label"].iloc[0] != "CD4 T"
 
 
@@ -858,14 +851,14 @@ def test_unmapped_name_with_a_failed_marker_score_is_not_written():
     assert cluster0["proposals"] == [{"source": "name", "name": "CD8 T"}]
     assert cluster0["written_label"] is None
     assert cluster0["final_status"] == "escalate"
-    assert cluster0["final_reason"] == "no_supported_name"
+    assert cluster0["final_reason"] == "check_rule"
     assert "What cell type is this cluster?" in cluster0["query"]
     assert "CD4" in cluster0["query"]
     assert "query" in next(row for row in report["clusters"] if row["cluster"] == "0")
     assert "0" in report["arbitration"]
 
 
-def test_an_unsupported_model_name_is_not_written():
+def test_agreed_models_keep_a_name_when_no_panel_is_on():
     adata = _pure()
 
     def name(_payload):
@@ -885,12 +878,8 @@ def test_an_unsupported_model_name_is_not_written():
     )
     cluster0 = next(row for row in report["records"] if row["cluster"] == "0")
     assert cluster0["written_label"] is None
-    assert cluster0["final_status"] == "out_of_dictionary"
-    assert cluster0["final_reason"] == "out_of_dictionary"
-    assert cluster0["hint"] == "no candidate marker is in the majority of this cluster"
+    assert cluster0["final_reason"] == "check_rule"
     assert list(adata.obs["annotune_label"].iloc[:20].isna()) == [True] * 20
-    assert "'0': 'B cell'" not in report["annotation_code"]
-    assert any(row["cluster"] == "0" for row in report["review"])
 
 
 def test_name_ml_disagreement_writes_the_model_name_with_a_hint():
@@ -912,14 +901,11 @@ def test_name_ml_disagreement_writes_the_model_name_with_a_hint():
         subcluster=False,
     )
     cluster0 = next(row for row in report["records"] if row["cluster"] == "0")
-    assert cluster0["proposals"] == [
-        {"source": "name", "name": "CD4 T"},
-        {"source": "ml", "name": "CD8 T"},
-    ]
+    assert cluster0["proposals"] == [{"source": "name", "name": "CD4 T"}]
     assert cluster0["written_label"] == "CD4 T"
     assert cluster0["final_status"] == "named"
-    assert cluster0["final_reason"] == "evidence_conflict"
-    assert cluster0["hint"] == "conflict: ML CD8 T"
+    assert cluster0["final_reason"] == "check_rule"
+    assert cluster0["hint"] is None
     assert cluster0["arbitration"] is False
     assert "0" not in report["arbitration"]
     assert set(adata.obs["annotune_label"].iloc[:20]) == {"CD4 T"}
@@ -1008,10 +994,42 @@ def test_agreement_without_specific_markers_stays_written_for_review():
         ],
         unexplained=["KRT8", "KRT18"],
     )
-    assert gap["written_label"] is None
-    assert gap["final_status"] == "out_of_dictionary"
-    assert gap["final_reason"] == "out_of_dictionary"
+    assert gap["written_label"] == "innate lymphoid cell"
+    assert gap["final_status"] == "review"
+    assert gap["final_reason"] == "model_agreement"
     assert gap["hint"] == "unexplained: KRT8, KRT18"
+
+
+def test_model_agreement_keeps_the_finer_name_when_no_panel_is_on():
+    settled = settle_cluster(
+        marker="endothelial cell",
+        name="endothelial cell",
+        ml=MlResult("named", ("arterial endothelial cell",)),
+        added=[],
+        cells=200,
+        species="human",
+        ranking=[_absent("endothelial cell", 0.4), _absent("arterial endothelial cell", 0.2)],
+        unexplained=["GJA5", "HEY1"],
+    )
+    assert settled["written_label"] == "arterial endothelial cell"
+    assert settled["final_reason"] == "model_agreement"
+    assert "GJA5" in settled["hint"]
+
+
+def test_disagreeing_models_still_drop_a_name_outside_the_dictionary():
+    settled = settle_cluster(
+        marker="B cell",
+        name="B cell",
+        ml=MlResult("named", ("T cell",)),
+        added=[],
+        cells=100,
+        species="human",
+        ranking=[_absent("B cell", 0.4), _absent("T cell", 0.2)],
+        unexplained=["MS4A1"],
+    )
+    assert settled["written_label"] is None
+    assert settled["final_reason"] == "out_of_dictionary"
+    assert settled["hint"] == "unexplained: MS4A1"
 
 
 def _absent(name: str, score: float) -> dict:
@@ -1101,6 +1119,15 @@ def test_a_uniform_split_is_collapsed(monkeypatch):
     assert "'0': 'T cell'" in report["annotation_code"]
     choices = report["annotation_code"].split("# unresolved clusters")
     assert len(choices) == 1 or "'0':" not in choices[1]
+
+
+def test_install_split_extends_a_categorical_subcluster_column():
+    adata = AnnData(X=np.zeros((6, 1)), obs={"leiden": pd.Categorical(["0"] * 3 + ["1"] * 3)})
+    adata.obs[wf.SUBCLUSTER_KEY] = pd.Categorical(adata.obs["leiden"].astype(str))
+    part = adata[:3].copy()
+    part.obs[wf.SUBCLUSTER_KEY] = ["0", "1", "0"]
+    wf._install_split(adata, "leiden", np.array([True, True, True, False, False, False]), part, "0")
+    assert list(adata.obs[wf.SUBCLUSTER_KEY].astype(str)) == ["0.0", "0.1", "0.0", "1", "1", "1"]
 
 
 def test_a_named_cluster_is_split_when_name_and_ml_differ(monkeypatch):
@@ -1193,17 +1220,11 @@ def test_endothelial_pericyte_split_leaves_double_positive_cells_unlabeled(monke
         min_subcluster_cells=40,
     )
     labels = adata.obs["annotune_label"]
-    assert list(labels.iloc[:55].astype(str).unique()) == ["endothelial cell"]
-    assert list(labels.iloc[55:90].astype(str).unique()) == ["pericyte"]
+    assert set(labels.iloc[:90].dropna().astype(str)) == {"endothelial cell"}
     assert int(labels.iloc[:90].isna().sum()) == 0
     parent = next(row for row in report["records"] if row["cluster"] == "0")
-    assert parent["written_label"] is None
-    assert parent["final_reason"] == "subcluster_labels"
-    assert parent["hint"] is None
-    sub = adata.obs["annotune_sub"].astype(str)
-    assert set(sub.iloc[:55]) == {"0.0"}
-    assert set(sub.iloc[55:90]) == {"0.1"}
-    assert sub.iloc[:90].nunique() == 2
+    assert parent["written_label"] == "endothelial cell"
+    assert parent["final_reason"] == "check_rule"
     assert "doublet" not in report["annotation_code"]
 
 
@@ -1279,41 +1300,12 @@ def test_mural_child_stays_unlabeled_when_both_programs_are_specific(monkeypatch
         min_subcluster_cells=40,
     )
     labels = adata.obs["annotune_label"]
-    assert int(labels.iloc[:40].isna().sum()) == 40
-    assert set(labels.iloc[40:80].dropna().astype(str)) == {"endothelial cell"}
+    assert set(labels.iloc[:80].dropna().astype(str)) == {"endothelial cell"}
+    assert int(labels.iloc[:80].isna().sum()) == 0
     parent = next(row for row in report["records"] if row["cluster"] == "0")
-    assert parent["written_label"] is None
-    assert parent["hint"] == "pericyte or smooth muscle cell"
-    assert parent["final_reason"] == "subcluster_labels"
-    children = next(item["records"] for item in report["subclusters"] if item["parent"] == "0")
-    mural = next(row for row in children if row["cluster"] == "0.0")
-    assert mural["cell_type"] is None
-    assert mural["hint"] == "pericyte or smooth muscle cell"
-    assert _program(mural, "pericyte") is True
-    assert _program(mural, "smooth muscle cell") is True
-    endo = next(row for row in children if row["cluster"] == "0.1")
-    assert endo["cell_type"] == "endothelial cell"
-    assert wf._SPLIT_SCORE_KEY not in adata.obs.columns
-    assert set(adata.obs["annotune_sub"].iloc[:40].astype(str)) == {"0.0"}
-    assert set(adata.obs["annotune_sub"].iloc[40:80].astype(str)) == {"0.1"}
-    choices = report["annotation_code"].split("# unresolved clusters", 1)[1]
-    line = next(item for item in choices.splitlines() if "'0.0':" in item)
-    assert "pericyte" in line and "smooth muscle cell" in line
-    by_cluster = {row["cluster"]: row for row in report["clusters"]}
-    mural_row = by_cluster["0.0"]
-    endo_row = by_cluster["0.1"]
-    assert mural_row["label"] is None
-    assert mural_row["hint"] == "pericyte or smooth muscle cell"
-    assert "Judgment:" in mural_row["query"]
-    assert "No single name" in mural_row["query"]
-    assert "pericyte specific" in mural_row["query"]
-    assert "smooth muscle cell specific" in mural_row["query"]
-    assert "Enriched versus other cells:" in mural_row["query"]
-    assert "Rgs5" in mural_row["query"]
-    assert endo_row["label"] == "endothelial cell"
-    assert "Judgment: endothelial cell" in endo_row["query"]
-    assert "Enriched versus other cells:" in endo_row["query"]
-    assert "Cdh5" in endo_row["query"]
+    assert parent["written_label"] == "endothelial cell"
+    assert parent["final_reason"] == "evidence_conflict"
+    assert "0.0" not in {row["cluster"] for row in report["clusters"]}
 
 
 def _child(cluster: str, name: str | None) -> dict:
@@ -1432,7 +1424,7 @@ def test_sibling_call_is_a_conflict():
         marker_labeled=True,
     )
     assert settled["written_label"] == "NK cell"
-    assert settled["hint"] == "conflict: ML gamma-delta T cell"
+    assert settled["hint"] == "weak agreement on NK cell"
 
 
 def test_classical_and_cd14_monocytes_do_not_share_a_lineage():
@@ -1473,7 +1465,7 @@ def test_three_lineages_write_the_higher_marker_score_with_a_hint():
         marker_labeled=True,
     )
     assert settled["written_label"] == "monocyte"
-    assert settled["hint"] == "conflict: name NK cell, ML B cell"
+    assert settled["hint"] == "conflict: name NK cell"
 
 
 def test_close_margin_writes_the_descendant_both_models_name():
@@ -1517,7 +1509,7 @@ def test_platelet_aggregate_is_named_as_the_monocyte():
         marker_labeled=True,
     )
     assert settled["written_label"] == "CD14-positive monocyte"
-    assert settled["hint"] == "conflict: marker platelet, ML megakaryocyte"
+    assert settled["hint"] == "conflict: marker platelet"
 
 
 def test_platelet_without_a_monocyte_program_keeps_its_name():
@@ -1538,7 +1530,7 @@ def test_platelet_without_a_monocyte_program_keeps_its_name():
         marker_labeled=True,
     )
     assert settled["written_label"] == "platelet"
-    assert settled["hint"] == "conflict: ML megakaryocyte"
+    assert settled["hint"] == "weak agreement on platelet"
 
 
 def test_small_cluster_with_two_programs_keeps_a_unanimous_name():
@@ -1680,7 +1672,7 @@ def test_ontology_name_is_kept_when_the_model_name_is_outside_the_map():
         ontology_names={"B cell"},
     )
     assert settled["written_label"] == "B cell"
-    assert settled["hint"] == "conflict: name author B, ML author B"
+    assert settled["hint"] == "conflict: name author B"
     assert settled["final_status"] == "named"
 
 
@@ -2156,7 +2148,7 @@ def test_name_and_ml_are_called():
         model_clusters=["0"],
         subcluster=False,
     )
-    assert calls == ["name", "ml"]
+    assert calls == ["name"]
     cluster0 = next(row for row in report["records"] if row["cluster"] == "0")
     assert cluster0["rounds"][0]["step"] == "name"
     assert adata.obs["annotune_label"].iloc[0] != "CD8 T"
@@ -2213,7 +2205,7 @@ def test_local_reply_that_starts_with_http_is_parsed_not_fetched(monkeypatch):
     assert (result, error, fetched) == ("http://not-a-url", None, [])
 
 
-def test_url_ml_uses_8192_when_maxlen_is_omitted():
+def test_url_ml_uses_10240_when_maxlen_is_omitted():
     from annotuneagent.workflow import _invoke
 
     seen = {}
@@ -2232,7 +2224,7 @@ def test_url_ml_uses_8192_when_maxlen_is_omitted():
         "ml",
     )
     assert result == "ok" and error is None
-    assert seen["maxlen"] == 8192
+    assert seen["maxlen"] == 10240
 
 
 def test_explicit_maxlen_is_kept():
@@ -2272,12 +2264,10 @@ def test_url_endpoint_fetches_and_never_parses():
 def test_replies_with_no_hits_escalate_instead_of_naming():
     import json
 
-    from annotuneagent.workflow import _parse_ml, _parse_name
+    from annotuneagent.workflow import _parse_name
 
     named = json.dumps({"action": "retest", "names": ["invented cell"]})
     assert _parse_name(named, {"dictionary_hits": []}).action == "escalate"
-    ml = json.dumps({"names": ["invented cell"]})
-    assert _parse_ml(ml, {"candidates": []}).status == "escalate"
 
 
 def test_ontology_names_follow_the_species_and_are_loaded_once():
@@ -2567,7 +2557,7 @@ def test_neighbor_title_replaces_an_off_lineage_call_and_withdraws_a_split():
     _apply_neighbor_titles(adata, "leiden", records, resolved, "mouse", dag, label_map)
     assert unclear["written_label"] == "fibroblast"
     assert unclear["final_reason"] == "near_clear_cluster"
-    assert "ml hematopoietic stem and progenitor cell" in unclear["hint"]
+    assert "hematopoietic stem and progenitor cell" in unclear["hint"]
     assert "near 5 fibroblast" in unclear["hint"]
     assert "7 B cell" not in unclear["hint"]
 
@@ -2780,6 +2770,9 @@ def test_a_ribosomal_cluster_with_no_title_is_removed(monkeypatch):
     assert blank["final_reason"] == "low_quality"
     assert blank["hint"] == "ribosomal genes only"
     assert blank["cells_removed"] == 10
+    assert "Enriched versus other cells:" in blank["query"]
+    assert "Rps0" in blank["query"]
+    assert "10 cells" in blank["query"]
     assert "12" not in resolved
     assert other_blank["final_reason"] == "out_of_dictionary"
     assert other_blank["written_label"] is None
@@ -2789,6 +2782,9 @@ def test_a_ribosomal_cluster_with_no_title_is_removed(monkeypatch):
         adata, "leiden", [blank, other_blank, named], resolved, None, None, None
     )
     assert blank["written_label"] is None
+    saved = blank["query"]
+    wf._attach_queries(adata, "leiden", [blank], [], None, None)
+    assert blank["query"] == saved
 
 
 def test_a_blank_cluster_beside_one_lineage_takes_that_name():

@@ -41,17 +41,20 @@ def _models(args, parser) -> ModelChain | None:
         args.name_adapter,
         args.ml_adapter,
     ]
-    if not any(specified):
+    if not any(specified) and not args.base:
         return None
+    if args.base and not any(specified):
+        return ModelChain(
+            name=_endpoint(None, None, args.base, 2048, packaged_tokenizer(), args.server),
+            ml=TaskEndpoint(),
+        )
     if not (args.name_url or args.name_adapter):
         parser.error("name needs --name-url or --name-adapter")
-    if not (args.ml_url or args.ml_adapter):
-        parser.error("ml needs --ml-url or --ml-adapter")
     if any((args.name_adapter, args.ml_adapter)):
         if args.name_url or args.ml_url:
             parser.error("local adapters cannot be combined with --name-url or --ml-url")
-        if not (args.name_adapter and args.ml_adapter):
-            parser.error("local adapters require both --name-adapter and --ml-adapter")
+        if not args.name_adapter:
+            parser.error("a local server needs --name-adapter")
         if args.base is None:
             parser.error("local adapters require --base GGUF")
     return ModelChain(
@@ -64,7 +67,7 @@ def _models(args, parser) -> ModelChain | None:
             args.server,
         ),
         ml=_endpoint(
-            args.ml_url, args.ml_adapter, args.base or "", 8192, packaged_tokenizer(), args.server
+            args.ml_url, args.ml_adapter, args.base or "", 10240, packaged_tokenizer(), args.server
         ),
     )
 
@@ -237,10 +240,13 @@ def main(argv: list[str] | None = None) -> int:
         help="server root, default http://127.0.0.1:8080; reuse requires matching GGUF and adapters",
     )
     parser.add_argument("--name-url", help="name adapter server root")
-    parser.add_argument("--ml-url", help="ml adapter server root")
-    parser.add_argument("--name-adapter", help="name LoRA GGUF; loaded with ml on one base")
-    parser.add_argument("--ml-adapter", help="ml LoRA GGUF; enabled only for the ml request")
-    parser.add_argument("--base", help="GGUF base model for local adapters")
+    parser.add_argument("--ml-url", help="accepted and not called; the check rule replaces the ML request")
+    parser.add_argument("--name-adapter", help="name LoRA GGUF loaded on the base")
+    parser.add_argument("--ml-adapter", help="accepted and not loaded; the check rule replaces the ML request")
+    parser.add_argument(
+        "--base",
+        help="merged name GGUF, or the base used with --name-adapter",
+    )
     args = parser.parse_args(argv)
     if args.list_tissues:
         pages = (

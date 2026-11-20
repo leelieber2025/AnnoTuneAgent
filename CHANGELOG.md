@@ -2,6 +2,44 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+## [0.1.6] - 2026-11-19
+
+### Changed
+
+- `run` calls the name model only. The check rule keeps that name, replaces
+  it with the one other supported candidate, or drops it. A supporting marker
+  has logfc above 0.5 and pct_in of at least 0.25. A blocking negative has
+  pct_in of at least 0.25 and logfc of at least 1. A cluster whose name the
+  check rule accepted is not split.
+- The name prompt lists the top 35 Wilcoxon genes. An enriched support gene
+  is appended only after a positive marker already qualifies. Low or
+  undetected genes stay out.
+- The name weight is one merged GGUF,
+  `Qwen3.5-4B-annotune-v9k-name.Q6_K.gguf`. Pass it as `TaskEndpoint(base=...)`
+  or `--base`. The server context for that call is 2048.
+- `adata` gains `annotune_label`, and `annotune_sub` only when a cluster
+  stays split. Status, hints, and merged cluster ids stay on the report.
+- `write_h5ad` is no longer part of the public API. `--output-h5ad` still
+  writes the file and stores the QC report as JSON.
+- The marker dictionary adds rare types, including plasmablast,
+  myofibroblast, BEST4+ enterocyte, mouse ILC1, muscle fiber subtypes,
+  bone-marrow stroma, juxtaglomerular cells, urothelial basal and umbrella
+  cells, spermatogenic stages, mammary luminal subsets, adrenal zones,
+  decidual stroma, mouse trophoblast, and thymic epithelium. Human prostate
+  luminal cells use ACP3. Human non-peptidergic nociceptors no longer treat
+  CALCA as a negative. Mouse corneal epithelium uses Krt12 and Krt5.
+  Colonocyte keeps CL:1000347.
+
+### Fixed
+
+- A cluster removed as `ribosomal genes only` still prints its enriched-gene
+  paragraph.
+- A later split can write `parent.child` ids after the subcluster column has
+  been turned into a categorical.
+- Subcluster PCA on a sparse matrix uses `arpack`.
+
 ## [0.1.5] - 2026-11-17
 
 ### Changed

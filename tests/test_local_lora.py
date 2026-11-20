@@ -44,7 +44,7 @@ def test_reuses_a_loaded_server_without_starting(monkeypatch, tmp_path):
             "url": url,
             "gguf": str(base.resolve()),
             "adapters": {name: str(Path(path).resolve()) for name, path in _ADAPTERS.items()},
-            "ctx": 8192,
+            "ctx": 10240,
         }
 
     monkeypatch.setattr(ll, "_described_server", described)
@@ -58,7 +58,7 @@ def test_reuses_a_loaded_server_without_starting(monkeypatch, tmp_path):
                 "url": "http://127.0.0.1:8080",
                 "gguf": str(base.resolve()),
                 "adapters": {name: str(Path(path).resolve()) for name, path in _ADAPTERS.items()},
-                "ctx": 8192,
+                "ctx": 10240,
             }
         ],
     )
@@ -90,7 +90,7 @@ def test_attached_server_is_checked_again(monkeypatch, tmp_path):
         "url": "http://127.0.0.1:8080",
         "gguf": str(base.resolve()),
         "adapters": {name: str(Path(path).resolve()) for name, path in _ADAPTERS.items()},
-        "ctx": 8192,
+        "ctx": 10240,
     }
     monkeypatch.setattr(ll, "_loaded_servers", lambda: [loaded])
     calls = {"n": 0}
@@ -191,8 +191,9 @@ def test_starts_on_the_service_port_when_nothing_is_loaded(monkeypatch, tmp_path
         return _Proc(123)
 
     monkeypatch.setattr(ll.subprocess, "Popen", fake_popen)
-    ll.open_adapters(_ADAPTERS, gguf=str(base), tokenizer="/tok", ctx=8192)
+    ll.open_adapters(_ADAPTERS, gguf=str(base), tokenizer="/tok")
     port = seen["cmd"][seen["cmd"].index("--port") + 1]
+    assert seen["cmd"][seen["cmd"].index("-c") + 1] == "10240"
     host = seen["cmd"][seen["cmd"].index("--host") + 1]
     assert host == "127.0.0.1"
     assert port == "8080"
@@ -285,7 +286,7 @@ def test_reuses_a_server_described_over_http(monkeypatch, tmp_path):
         if path == "/props":
             return {
                 "model_path": str(base.resolve()) + "/",
-                "default_generation_settings": {"n_ctx": 8192},
+                "default_generation_settings": {"n_ctx": 10240},
             }
         if path == "/lora-adapters":
             return [
@@ -303,7 +304,7 @@ def test_reuses_a_server_described_over_http(monkeypatch, tmp_path):
     assert ll._SERVER["mode"] == "llama"
     assert ll._SERVER["owned"] is False
     assert ll._SERVER["proc"].pid == -1
-    assert ll._SERVER["ctx"] == 8192
+    assert ll._SERVER["ctx"] == 10240
     assert ll.local_server() == "http://127.0.0.1:8080"
     assert not ll._STATE.exists()
     ll.open_adapters(adapters, gguf=str(base), tokenizer="/tok")

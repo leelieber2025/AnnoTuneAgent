@@ -346,7 +346,6 @@ def test_stubbed_model_calls_skip_the_tokenizer_check(monkeypatch):
         importlib.util, "find_spec", lambda name, *a: None if name == "jinja2" else real(name, *a)
     )
     monkeypatch.setattr(workflow, "fetch_name", lambda *_a, **_k: Decision("escalate"))
-    monkeypatch.setattr(workflow, "fetch_ml", lambda *_a, **_k: MlResult("escalate"))
     url = ata.ModelChain(
         name=ata.TaskEndpoint(url="http://h:8080"), ml=ata.TaskEndpoint(url="http://h:8080")
     )
@@ -383,7 +382,9 @@ def test_write_h5ad_keeps_the_prepare_report(tmp_path: Path):
     adata.uns["annotune_prep"] = {"qc": {"batches": [{"batch": "all", "rules": [{"n": 1}]}]}}
     with pytest.raises(Exception):
         adata.copy().write_h5ad(tmp_path / "plain.h5ad")
-    ata.write_h5ad(adata, tmp_path / "ok.h5ad")
+    from annotuneagent.prepare import write_h5ad
+
+    write_h5ad(adata, tmp_path / "ok.h5ad")
     back = ad.read_h5ad(tmp_path / "ok.h5ad")
     assert json.loads(back.uns["annotune_prep"])["qc"]["batches"][0]["batch"] == "all"
     assert isinstance(adata.uns["annotune_prep"], dict)

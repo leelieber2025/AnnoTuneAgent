@@ -1,8 +1,8 @@
 # Read the report
 
 `run` returns a dictionary and prints a `Queries` block. Each block is one
-cluster. AnnoTuneAgent does not send this text to the name model,
-the ML model, or any other service. Copy the paragraph under the heading and
+cluster. AnnoTuneAgent does not send this text to the name model
+or any other service. Copy the paragraph under the heading and
 paste it into another model.
 
 ## The heading
@@ -25,9 +25,8 @@ cluster 2  CD14-positive monocyte  conflict: marker neutrophil
 
 The written title is `CD14-positive monocyte`. The marker score named
 `neutrophil`, and that name is not on the same Cell Ontology lineage as the
-title. The hint records the other call. The same line can name the name model
-or the ML model, for example `conflict: ML pericyte`. Several disagreements
-are joined with commas.
+title. The hint records the other call. Several disagreements are joined
+with commas.
 
 ## The paragraph to paste
 
@@ -58,12 +57,12 @@ single name says so in that line.
 A cluster is removed only when it has no title of its own and at least half
 of those 20 genes are ribosomal proteins that are also detected in
 at least 70% of the other cells. The heading hint is `ribosomal genes only`.
-A missing title alone does not remove it. A high ribosomal count share does
-not remove a cluster that already has a title.
+The enriched-gene paragraph is still printed. A missing title alone does not
+remove it. A high ribosomal count share does not remove a cluster that
+already has a title.
 
-A reply from the other model is not written back into `adata` or the report.
-Use it when you decide whether to keep or change the title in
-`annotation_code`.
+The check result is already in the written title. Use the paragraph when you
+decide whether to keep or change that title in `annotation_code`.
 
 The same paragraph is `query` on `report["clusters"]` and on
 `report["review"]`.
@@ -79,17 +78,16 @@ title is not a vote count.
 | `cells` | Cells in that cluster |
 | `marker` | Name from the marker score, or none |
 | `name` | First name copied by the name model. `failed` when the call failed. The action when the reply named nothing |
-| `ml` | First name copied by the ML model. `escalate` when it abstains. `failed` when the call failed |
+| `check` | Name kept or chosen by the check rule. Empty when the rule dropped the proposal |
 | `label` | Title written onto the cells. Empty when the cluster stays unnamed |
-| `hint` | The question printed after the title. Empty when there is nothing to ask. Weak agreement keeps its title and puts the doubt here. A name outside the dictionary is not written; this hint lists the unexplained genes. Endothelial cell is written instead of pericyte when an endothelial gene is enriched and no pericyte program gene is; the hint is `endothelial cell rather than pericyte`. When a split child is specific for both pericyte and smooth muscle cell, neither name is written and the hint is `pericyte or smooth muscle cell` |
+| `hint` | The question printed after the title. Empty when there is nothing to ask. Weak agreement keeps its title and puts the doubt here. A name outside the dictionary lists the unexplained genes here. Endothelial cell is written instead of pericyte when an endothelial gene is enriched and no pericyte program gene is; the hint is `endothelial cell rather than pericyte`. When a split child is specific for both pericyte and smooth muscle cell, neither name is written and the hint is `pericyte or smooth muscle cell` |
 | `query` | The paragraph to paste. Present for every cluster that has a Wilcoxon table, including each remaining child. A child paragraph includes the marker judgment |
 | `reason` | Why the title was written or withheld |
 | `ontology` | Cell Ontology id for the written title. `pending` means the id is not a reviewed row |
 
-`adata.obs["annotune_label"]` is the title. `adata.obs["annotune_hint"]` is
-the hint on every cell of that cluster. `adata.obs["annotune_final_status"]`
-is `named`, `review`, `escalate`, or `out_of_dictionary`. Clusters that share a title also share
-one id in `adata.obs["annotune_cluster"]`. The Leiden column is kept.
+`adata.obs["annotune_label"]` is the title. Hints and status stay on the
+report. The Leiden column is kept. `annotune_sub` is present only when a
+cluster stays split.
 
 ## What to read first
 
@@ -106,8 +104,7 @@ order, not an accuracy score.
 
 `report["queue"]` lists clusters that still have at least one unlabeled cell.
 A cluster whose cells are all named is not in `queue`, even when that cluster
-has no single title of its own. A titled cluster with a hint is in `review`
-and on `annotune_hint`.
+has no single title of its own. A titled cluster with a hint is in `review`.
 
 ## The rest of the report
 
@@ -115,9 +112,9 @@ and on `annotune_hint`.
 |---|---|
 | `records` | The working record for each cluster, including model rounds and the marker ranking |
 | `dropped_hypotheses` | Dictionary types left out because none of their positive markers are in the matrix |
-| `subclusters` | One split of a cluster the marker score did not label, of a cytotoxic mixture whose top panel is not a specific mature NK T cell, and of a cluster whose name and ML calls are different lineages when the children receive more than one title. Two names produce at most two child clusters, and every cell in a labeled child takes that child's name. Those children are scored against every other cell. A child specific for both pericyte and smooth muscle cell stays unlabeled. A split whose cells all have one title is dropped. Empty when `subcluster=False` or nothing was split |
+| `subclusters` | One split of a cluster the marker score did not label, of a cytotoxic mixture whose top panel is not a specific mature NK T cell, and of a cluster whose name call and another supported program are different lineages when the children receive more than one title. Two names produce at most two child clusters, and every cell in a labeled child takes that child's name. Those children are scored against every other cell. A child specific for both pericyte and smooth muscle cell stays unlabeled. A split whose cells all have one title is dropped. Empty when `subcluster=False` or nothing was split |
 | `arbitration` | Clusters that were not given the status `named` |
-| `merged` | Titles that were given one `annotune_cluster` id |
+| `merged` | Titles that group more than one cluster |
 | `all_labeled` | True when every cell has a title |
 | `written` | True when at least one cell has a title |
 | `label_key` | The `obs` column that holds the title. `None` when nothing was written |

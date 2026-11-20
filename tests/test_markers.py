@@ -242,16 +242,21 @@ def test_eosinophil_uses_species_specific_positive_markers():
     "cell_type",
     [
         "mononuclear cytotrophoblast cell",
-        "syncytiotrophoblast cell",
         "extravillous trophoblast",
     ],
 )
 def test_human_placental_types_have_no_mouse_copy(cell_type):
     assert cell_type in marker_names("human", "placenta")
-    assert cell_type not in marker_names("mouse")
-    assert "placenta" not in tissue_pages("mouse")
-    with pytest.raises(ValueError, match="unknown mouse tissue"):
-        marker_names("mouse", "placenta")
+    assert cell_type not in marker_names("mouse", "placenta")
+
+
+def test_mouse_placenta_uses_mouse_trophoblast_markers():
+    mouse = marker_names("mouse", "placenta")
+    assert "trophoblast giant cell" in mouse
+    assert "spongiotrophoblast cell" in mouse
+    syncytium = hypotheses_from_names(["syncytiotrophoblast cell"], "mouse", "placenta")[0]
+    assert syncytium.positive == ("Syna", "Synb", "Gcm1")
+    assert "Cyp19a1" not in syncytium.positive
 
 
 @pytest.mark.parametrize("species", ["human", "mouse"])

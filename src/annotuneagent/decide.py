@@ -1,13 +1,12 @@
 # Copyright 2026 Zhao Li (李钊)
 # Licensed under the Apache License, Version 2.0
 
-"""Name and ML results for one cluster.
+"""Name-model results and the check rule for one cluster.
 
-The name model copies a cell-type name from the marker dictionary. The ML
-model reads measured differential expression and candidate marker panels, and
-copies a name from those candidates. Both return a result when a model chain
-is supplied. The workflow judgment reads those results together with the
-marker score and writes the title.
+The name model copies a cell-type name from the marker dictionary. The check
+rule reads that proposal and the marker measurements. It keeps the name,
+replaces it, or drops it. The workflow writes the title from that result and
+the marker score.
 """
 
 from __future__ import annotations
@@ -66,6 +65,10 @@ _ACTIONS = frozenset({"adopt_subcluster", "retest", "refuse", "escalate"})
 
 # A marker counts as support only above this log2 fold change.
 SUPPORT_LOGFC = 0.5
+
+# Wilcoxon genes shown to the name model, in rank order. Marker genes that
+# pass the same enrichment cut and fall outside this head are appended.
+GENE_HEAD = 35
 
 # dictionary_hits is shuffled so position is not rank. The seed does not
 # include the input path: a renamed file and the Python API share one order.
@@ -337,7 +340,7 @@ def ranked_payload(
     """Action and name user object from a Wilcoxon-ordered gene list."""
     by_gene = dict(order)
     genes: list[dict[str, object]] = [
-        {"gene": gene, "logfc": round(change, 1)} for gene, change in order[:25]
+        {"gene": gene, "logfc": round(change, 1)} for gene, change in order[:GENE_HEAD]
     ]
     scored: list[tuple[float, str, list[str]]] = []
     for item in hypotheses:
@@ -354,6 +357,18 @@ def ranked_payload(
                 continue
             chosen.append(gene)
             total += value
+        # Support genes do not change the hit score. They are listed only when
+        # they are enriched, the same cut as a positive gene.
+        if chosen:
+            for gene in item.support:
+                if gene in chosen:
+                    continue
+                value = by_gene.get(gene)
+                if value is None or value <= SUPPORT_LOGFC:
+                    continue
+                if pct.get(gene, 0.0) < NEGATIVE_PRESENT_PCT:
+                    continue
+                chosen.append(gene)
         if item.requires_any and not any(
             pct.get(gene, 0.0) >= NEGATIVE_PRESENT_PCT for gene in item.requires_any
         ):
@@ -411,7 +426,7 @@ def cluster_payload(
     """User message: top genes plus dictionary hits.
 
     Gene order is the Wilcoxon score order. Marker genes with logfc>0 that
-    fall outside the top 25 are appended. A caller that builds many clusters
+    fall outside the top 35 are appended. A caller that builds many clusters
     passes the ``wilcoxon_order`` result as ``tables``, so the matrix is not
     checked again for every cluster.
     """
@@ -580,7 +595,7 @@ def payload_agreement(runtime: dict[str, object], wilcoxon: dict[str, object]) -
     """Overlap of the two rankings. A mismatch is a contract gap, not a model error."""
 
     def ranked(payload: dict[str, object]) -> list[str]:
-        return [str(item["gene"]) for item in list(payload["genes"])[:25]]
+        return [str(item["gene"]) for item in list(payload["genes"])[:GENE_HEAD]]
 
     def hits(payload: dict[str, object]) -> list[tuple[str, tuple[str, ...]]]:
         return [
@@ -696,7 +711,7 @@ def fetch_ml(
     payload: dict[str, object],
     timeout: float | None = None,
     *,
-    maxlen: int = 8192,
+    maxlen: int = 10240,
     tokenizer: str | None = None,
     system: str | None = None,
 ) -> MlResult:
@@ -732,6 +747,49 @@ def ml_stat_row(positive: list[dict], negative: list[str], measurements: dict[st
         sum(gene not in measurements for gene in negative),
         (sum(values) / len(values)) if values else None,
     ]
+
+
+def check_proposal(
+    proposal: str | None,
+    hypotheses: list[Hypothesis],
+    measurements: dict[str, dict],
+) -> dict[str, object]:
+    """Keep, replace, or drop a proposed name using marker measurements.
+
+    A supporting marker has logfc above 0.5 and pct_in of at least 0.25.
+    A blocking negative has pct_in of at least 0.25 and logfc of at least 1.
+    The proposal stays with two supporting markers and no blocking negative.
+    One other supported candidate replaces it. Any other case drops it.
+    """
+    by_name: dict[str, Hypothesis] = {}
+    for item in hypotheses:
+        by_name.setdefault(item.name, item)
+
+    def status(item: Hypothesis) -> str:
+        rows = [measurements[gene] for gene in item.positive if gene in measurements]
+        support = trial_support(rows, list(item.negative), measurements)
+        supported = support["n_positive_supported_detected"] >= 2
+        blocked = bool(support["blocked_by_negative"])
+        if supported and not blocked:
+            return "clean"
+        if supported and blocked:
+            return "conflict"
+        return "weak"
+
+    states = {name: status(item) for name, item in by_name.items()}
+    state = states.get(proposal) if proposal else None
+    clean = [
+        name
+        for name, item_status in states.items()
+        if item_status == "clean" and name != proposal
+    ]
+    if state == "clean":
+        return {"action": "agree", "name": proposal, "reason": "agree", "also_clean": clean}
+    if state == "conflict":
+        return {"action": "escalate", "name": None, "reason": "conflict", "also_clean": clean}
+    if len(clean) == 1:
+        return {"action": "replace", "name": clean[0], "reason": "replace", "also_clean": []}
+    return {"action": "escalate", "name": None, "reason": "escalate", "also_clean": clean}
 
 
 def trial_support(positive: list[dict], negative: list[str], measurements: dict[str, dict]) -> dict:

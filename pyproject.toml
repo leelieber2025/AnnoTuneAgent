@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "annotuneagent"
 dynamic = ["version"]
-description = "Cluster-level cell-type annotation from marker, name, and ML results"
+description = "Cluster-level cell-type annotation from a marker score and a name model"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"

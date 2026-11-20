@@ -10,29 +10,33 @@
 
 Documentation: [Read the Docs](https://annotuneagent.readthedocs.io/en/latest/).
 
-**Cluster-level cell-type annotation for single-cell RNA-seq, with two
-fine-tuned language models that run locally.**
+**Cluster-level cell-type annotation for single-cell RNA-seq. One fine-tuned
+language model runs locally, and a check rule reads the marker measurements.**
 
-Each cluster gets a marker score, a name-model result, and an ML-model
-result. A rule-based judgment reads all three and writes the title, so every
-call stays auditable.
+Each cluster gets a marker score and a name-model result. The check rule
+keeps that name, replaces it, or drops it. The marker score can still name
+the cluster when the check drops the proposal. Every call stays auditable.
 
 ## What is fine-tuned
 
-One Qwen3.5-4B base (Q6_K GGUF) is shared by two independent LoRA adapters.
-The adapters are not merged into the base, so they load together on a single
-local `llama-server` and can be replaced without touching the base. If that
-server was started with `--api-key`, set `ANNOTUNE_API_KEY`. The same value
-is sent as a bearer token.
+The current name model is one Q6_K GGUF,
+`Qwen3.5-4B-annotune-v9k-name.Q6_K.gguf`. It is loaded with `-m` and no
+LoRA. If that server was started with `--api-key`, set `ANNOTUNE_API_KEY`.
+The same value is sent as a bearer token.
 
-| Model | Task it was fine-tuned for | Input | Output |
+| Step | What it does | Input | Output |
 | --- | --- | --- | --- |
-| **name** | Choose a cell-type name from the marker dictionary | Cluster marker evidence and `dictionary_hits` | A name copied from `dictionary_hits` when that type's markers support the cluster |
-| **ML** | Choose a name from measured cluster statistics | Differential expression, candidate marker panels, log fold change, fraction of cells expressing each gene inside and outside the cluster, panel summaries | A name copied from those candidates |
+| **name** | Choose a cell-type name from the marker dictionary | Cluster marker evidence and `dictionary_hits` | A name copied from `dictionary_hits` |
+| **check** | A fixed rule, not a model | The proposed name and each candidate's marker measurements | Keep the name, replace it with the one supported candidate, or drop it |
 
-Both models are trained to **copy** a name from the candidates they are
-shown, not to free-write one. A name outside the candidate list cannot become
-a title, and a name with no marker that passes expression and specificity
+The name model is trained to **copy** a name from `dictionary_hits`, not to
+free-write one. A positive marker supports a type when its log fold change is
+above 0.5 and it is detected in at least 25% of the cluster. A negative
+marker blocks a type only when it is that common and its log fold change is
+at least 1. The proposal stays when at least two markers support it and none
+block it. It is replaced only when it is not supported and exactly one other
+candidate is. Otherwise it is dropped, and the marker score can still name
+the cluster. A name with no marker that passes expression and specificity
 validation is flagged (`no_marker_passed`) instead of being trusted silently.
 
 The weights are on the Hugging Face Hub:
@@ -45,26 +49,26 @@ The weights are on the Hugging Face Hub:
 raw counts ─ prepare ─▶ QC, doublets, normalization, batch correction, Leiden
            ─ run ─────▶ per cluster:
                           1. marker score        (built-in human / mouse dictionary)
-                          2. name model          (LoRA, copies from dictionary_hits)
-                          3. ML model            (LoRA, copies from measured candidates)
+                          2. name model          (one GGUF, copies from dictionary_hits)
+                          3. check rule          (keeps, replaces, or drops that name)
                           ▼
-                        judgment ─▶ title + status + reason + hint
+                        title + status + reason + hint
                           ▼
                         validated marker panels, dotplot, report, annotated h5ad
 ```
 
-- **Judgment, not voting.** Agreement among the three results gives a clear
-  title. Disagreement, mixed programs, and unvalidated names are kept and
-  flagged with a reason (`mixed_programs`, `near_clear_cluster`,
-  `subcluster_labels`, `no_marker_passed`) so you can review them.
+- **A rule, not a second model.** The check reads the measurements. It does
+  not call another adapter. Mixed programs and unvalidated names stay flagged
+  (`mixed_programs`, `near_clear_cluster`, `subcluster_labels`,
+  `no_marker_passed`, `check_rule`) so you can review them.
 - **Marker evidence is checked, not quoted.** Panels are selected from cited
   dictionary markers and validated against measured expression and
   specificity in your data.
-- **Every title is traceable.** The report records each model's answer, the
-  panel, and the reason a cluster was or was not settled.
+- **Every title is traceable.** The report records the name-model answer, the
+  check result, the panel, and the reason a cluster was or was not settled.
 
-The models run when `models` is passed (or the CLI adapter flags are given).
-Without them, `run` uses the marker score alone.
+The name model runs when `models` is passed (or `--name-adapter` / `--name-url`
+is given). Without it, `run` uses the marker score alone.
 
 ## Install
 
@@ -156,20 +160,21 @@ annotuneagent \
   --output result.json
 ```
 
-`--name-adapter`, `--ml-adapter`, and `--base` run the name and ML models on
-one local server and require `--output-h5ad`. The weights are on the Hugging
+`--base` with the merged GGUF runs the name model on one local server and
+requires `--output-h5ad`. The check rule then reads the marker measurements.
+The weights are on the Hugging
 Face Hub: [lieberlee/annotune-qwen3.5-4b-gguf](https://huggingface.co/lieberlee/annotune-qwen3.5-4b-gguf).
 The tokenizer is installed with the package. See
 [docs/tutorials/load_model.ipynb](docs/tutorials/load_model.ipynb).
 
 ## Status
 
-**0.1.5 (Alpha).** Import as `import annotuneagent as ata`.
+**0.1.6 (Alpha).** Import as `import annotuneagent as ata`.
 
 ## Citation
 
 For the software record, cite the [Zenodo DOI](https://doi.org/10.5281/zenodo.24092828).
-Pin the package version used in the analysis, for example `annotuneagent==0.1.5`.
+Pin the package version used in the analysis, for example `annotuneagent==0.1.6`.
 
 ## License
 

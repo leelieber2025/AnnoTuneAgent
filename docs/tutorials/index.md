@@ -1,13 +1,13 @@
 # Tutorials
 
 `prepare` is the first call. It prints the QC rules, then draws the QC
-figures and the UMAP. `run` collects the marker score, the name-model result,
-and the ML-model result, and writes the title. The model server stays loaded
-between calls.
+figures and the UMAP. `run` collects the marker score and the name-model
+result. The check rule keeps, replaces, or drops that name. The model server
+stays loaded between calls.
 
 | Page | Contents |
 |----------|----------|
-| {doc}`pbmc8k_annotation` | Public PBMC 8k: `prepare`, then the name and ML models |
+| {doc}`pbmc8k_annotation` | Public PBMC 8k: `prepare`, then the name model and the check rule |
 | {doc}`gse266598_annotation` | GEO series GSE266598: series record, download, `prepare`, annotation |
 | {doc}`load_model` | Download the weights, then use a local server or connect to a remote one |
 | {doc}`report` | What each part of the `run` report is for, including the text to paste |
@@ -30,7 +30,7 @@ jupyter lab docs/tutorials/
 :link: pbmc8k_annotation
 :link-type: doc
 
-`prepare`, then the name and ML models.
+`prepare`, then the name model and the check rule.
 +++
 Public PBMC 8k counts
 :::

@@ -53,10 +53,10 @@ adata = ata.prepare(adata, species="mouse", batch_key="sample")
 read the series page, download the two calvarial samples, then `prepare` and
 `run`.
 
-## Run the name and ML models
+## Run the name model
 
-The call above collects the marker score only. To also run the name and ML
-models, download the weights from the Hub
+The call above collects the marker score only. To also run the name model,
+download the weights from the Hub
 ([lieberlee/annotune-qwen3.5-4b-gguf](https://huggingface.co/lieberlee/annotune-qwen3.5-4b-gguf))
 and pass them to `run`. {doc}`tutorials/load_model` covers the download, the
 `llama-server` install, and remote servers. If that server was started with
@@ -64,7 +64,11 @@ and pass them to `run`. {doc}`tutorials/load_model` covers the download, the
 token.
 
 ```python
-models = ata.local_models("/path/to/annotune-models")
+model = "/path/to/Qwen3.5-4B-annotune-v9k-name.Q6_K.gguf"
+models = ata.ModelChain(
+    name=ata.TaskEndpoint(base=model, maxlen=2048, server="http://127.0.0.1:8080"),
+    ml=ata.TaskEndpoint(),
+)
 report = ata.run(adata, "leiden", species="human", models=models)
 ```
 
@@ -167,9 +171,7 @@ annotuneagent --input counts.h5ad --output report.json --output-h5ad prepared.h5
 
 When the CLI writes a prepared `.h5ad`, it stores `uns["annotune_prep"]` as a
 JSON string so AnnData can write the nested QC report. After reloading, use
-`json.loads(adata.uns["annotune_prep"])`. From Python, save with
-`ata.write_h5ad(adata, "prepared.h5ad")`; `adata.write_h5ad` raises on that
-report.
+`json.loads(adata.uns["annotune_prep"])`.
 
 ## Outputs
 
@@ -208,8 +210,7 @@ panel, not to each gene separately.
 - `dropped_hypotheses`: each dictionary type left out because none of its
   positive markers are in the matrix. One missing positive gene stays in the
   panel and scores 0, and the type stays. A missing support gene is omitted.
-  A missing negative gene stays on the panel, is not scored, and is counted
-  as unmeasured for the ML call.
+  A missing negative gene stays on the panel and is not scored.
 - `review`: clusters that still need a look. The order is not an accuracy
   score.
 - `annotation_code`: an editable cluster mapping, `fine_order`, a `marker_dict`,
@@ -225,7 +226,7 @@ with the marker judgment and the genes enriched against the other cells.
 A Cell Ontology id is the exact map row for the written label. An unreviewed id
 is marked pending.
 
-Clusters with the same written title share one id in `obs["annotune_cluster"]`.
+Clusters with the same written title are listed together in `report["merged"]`.
 The original Leiden column is kept. A cluster with no title stays on its own.
 
 ## Ambient RNA
@@ -263,10 +264,12 @@ same way when it has the `batch_key` column.
 
 ## How a cluster gets its name
 
-A judgment reads the marker score, the name-model result, and the ML-model
-result. It writes a dictionary name, or it leaves the cluster unnamed and
-records why. A hint, when there is one, is stored on `annotune_hint`. The
-record's `final_reason` says why the title was written or withheld.
+A judgment reads the marker score and the name-model result. The check rule
+keeps that name, replaces it with the one supported candidate, or drops it.
+The marker score can still name the cluster when the check drops the
+proposal. The record's `hint` and `final_reason` say why the title was
+written or withheld. Those fields stay on the report.
+`check_rule` means the check wrote or withheld the title.
 
 - `cytotoxic_mixture`: the NK panel and the T panel are both specific. The
   cluster stays unnamed so it can be split. A top-ranked `mature NK T cell`
@@ -275,20 +278,17 @@ record's `final_reason` says why the title was written or withheld.
 
 - `no_marker_passed`: none of the name's cited markers passed the expression
   check. The name stays, the hint reads `no marker passed`, and the dotplot
-  shows the best-measured cited genes. When the name and ML models already
-  agree on that name, a different marker call does not replace it. Otherwise
-  a marker call that passed is written, and an unchecked marker call is tried
-  once. If that call fails, and the two models agree on another lineage, that
-  agreed name is written instead.
-- `mixed_programs`: a cluster under 40 cells shows two programs. It is named
-  only when the marker score, name model, and ML model give the same name. The
-  hint lists the programs. Otherwise the cluster stays unnamed.
+  shows the best-measured cited genes. When the check rule kept that name, a
+  different marker call does not replace it. Otherwise a marker call that
+  passed is written, and an unchecked marker call is tried once.
+- `mixed_programs`: a cluster under 40 cells shows two programs. It stays
+  unnamed. The hint lists the programs.
 - `near_clear_cluster`: a cluster with an unclear name takes the title of the
   one clear cluster it touches on the neighbor graph or the UMAP. A title is
-  clear when the name and ML models wrote the same name, or, when no model ran,
-  when the marker rule wrote it without a hint. A name a model already wrote on
-  the same lineage stays, and the hint names the neighboring cluster. A cluster
-  that touches two lineages is not renamed.
+  clear when the check rule wrote it, or, when no model ran, when the marker
+  rule wrote it without a hint. A name the model already wrote on the same
+  lineage stays, and the hint names the neighboring cluster. A cluster that
+  touches two lineages is not renamed.
 - `low_quality`: a cluster is removed only when it has no title of its own
   and at least half of its 20 leading enriched genes are ribosomal
   proteins detected in at least 70% of the other cells. The hint is
@@ -297,5 +297,5 @@ record's `final_reason` says why the title was written or withheld.
 
 `report["queue"]` lists clusters that still have at least one cell without a
 title. A cluster whose cells are all named, including by a subcluster split,
-is not in `queue`. To find a titled cluster that still carries a question,
-filter on `annotune_hint`.
+is not in `queue`. A titled cluster that still carries a question is in
+`report["review"]`.

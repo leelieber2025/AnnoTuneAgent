@@ -19,7 +19,6 @@ The public API is the names below and `annotuneagent.__version__`.
    GeoSeries
    GeoSample
    prepare
-   write_h5ad
    run
    annotate
    evaluate

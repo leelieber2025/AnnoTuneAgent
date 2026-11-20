@@ -167,7 +167,7 @@ def test_cli_prepare_prints_install_line_when_scvi_is_missing(tmp_path: Path, mo
         ("testis", "Sertoli cell", ["SOX9", "CLDN11"]),
         ("ovary", "granulosa cell", ["FOXL2", "INHA"]),
         ("mammary", "luminal epithelial cell of mammary gland", ["KRT8", "KRT18"]),
-        ("prostate", "luminal cell of prostate epithelium", ["KLK3", "ACPP"]),
+        ("prostate", "luminal cell of prostate epithelium", ["KLK3", "ACP3"]),
         ("endometrium", "glandular epithelial cell of endometrium", ["FOXA2", "EPCAM"]),
         ("cornea", "corneal epithelial cell", ["KRT3", "KRT12"]),
         ("adrenal", "cortical cell of adrenal gland", ["STAR", "CYP11A1"]),
@@ -450,7 +450,7 @@ def test_cli_local_models_load_only_name_and_ml(tmp_path: Path, monkeypatch):
     hypotheses.write_text(json.dumps([{"name": "A cell", "positive": ["A"]}]))
     seen = []
 
-    def open_two(adapters, *, gguf, tokenizer, url=None):
+    def open_two(adapters, *, gguf, tokenizer, url=None, **_extra):
         seen.append((adapters, gguf, tokenizer, url))
 
     def unavailable(*_args, **_kwargs):
@@ -484,7 +484,7 @@ def test_cli_local_models_load_only_name_and_ml(tmp_path: Path, monkeypatch):
         == 0
     )
     assert len(seen) == 1
-    assert seen[0][0] == {"name": "name.gguf", "ml": "ml.gguf"}
+    assert seen[0][0] == {"name": "name.gguf"}
     assert out.is_file() and labeled.is_file()
 
 
@@ -524,14 +524,7 @@ def test_cli_model_nominates_a_dictionary_type_and_writes_it(tmp_path: Path, mon
         seen.append(payload)
         return Decision("retest", ("CD4 T",))
 
-    def nominate_ml(_url, payload, **_extra):
-        assert "marker" not in payload
-        from annotuneagent.decide import MlResult
-
-        return MlResult("escalate")
-
     monkeypatch.setattr("annotuneagent.workflow.fetch_name", nominate_name)
-    monkeypatch.setattr("annotuneagent.workflow.fetch_ml", nominate_ml)
     assert (
         main(
             [
@@ -564,7 +557,7 @@ def test_cli_model_nominates_a_dictionary_type_and_writes_it(tmp_path: Path, mon
     rounds = output["records"]
     cluster0 = next(row for row in rounds if row["cluster"] == "0")
     assert cluster0["added"] == ["CD4 T"]
-    assert [step["step"] for step in cluster0["rounds"]] == ["name", "ml"]
+    assert [step["step"] for step in cluster0["rounds"]] == ["name", "check"]
     evaluated = next(row for row in output["evaluation"]["clusters"] if row["cluster"] == "0")
     assert evaluated["predicted"] == "CD4 T"
     assert evaluated["exact"] is True
@@ -587,14 +580,7 @@ def test_cli_model_path_saves_unresolved_cells(tmp_path: Path, monkeypatch):
         calls.append("name:" + url)
         return Decision("retest", ("A",))
 
-    def ml(url, _payload, **_extra):
-        calls.append(url)
-        from annotuneagent.decide import MlResult
-
-        return MlResult("escalate")
-
     monkeypatch.setattr("annotuneagent.workflow.fetch_name", no_name)
-    monkeypatch.setattr("annotuneagent.workflow.fetch_ml", ml)
     assert (
         main(
             [
@@ -616,7 +602,7 @@ def test_cli_model_path_saves_unresolved_cells(tmp_path: Path, monkeypatch):
         )
         == 0
     )
-    assert calls == ["name:http://localhost:9932", "http://localhost:9933"] * 2
+    assert calls == ["name:http://localhost:9932", "name:http://localhost:9932"]
     assert ad.read_h5ad(labeled).obs["annotune_label"].isna().all()
     assert json.loads(dest.read_text())["queue"] == ["0", "1"]
     report = json.loads(dest.read_text())
@@ -625,11 +611,11 @@ def test_cli_model_path_saves_unresolved_cells(tmp_path: Path, monkeypatch):
         row["final_status"] == "review" and row["final_reason"] == "small_cluster"
         for row in report["records"]
     )
-    assert set(ad.read_h5ad(labeled).obs["annotune_final_status"]) == {"review"}
+    assert "annotune_final_status" not in ad.read_h5ad(labeled).obs.columns
 
 
 def test_cli_writes_a_marker_name_that_name_and_ml_repeat(tmp_path: Path, monkeypatch):
-    from annotuneagent.decide import Decision, MlResult
+    from annotuneagent.decide import Decision
 
     x = np.zeros((40, 3))
     x[:20, 0] = 5
@@ -648,10 +634,6 @@ def test_cli_writes_a_marker_name_that_name_and_ml_repeat(tmp_path: Path, monkey
     monkeypatch.setattr(
         "annotuneagent.workflow.fetch_name",
         lambda _url, _payload, **_extra: Decision("retest", ("A cell",)),
-    )
-    monkeypatch.setattr(
-        "annotuneagent.workflow.fetch_ml",
-        lambda _url, _payload, **_extra: MlResult("named", ("A cell",)),
     )
     assert (
         main(
@@ -676,13 +658,13 @@ def test_cli_writes_a_marker_name_that_name_and_ml_repeat(tmp_path: Path, monkey
     )
     record = next(row for row in json.loads(out.read_text())["records"] if row["cluster"] == "0")
     assert record["final_status"] == "named"
-    assert record["final_reason"] == "evidence_agreement"
+    assert record["final_reason"] == "check_rule"
     assert record["written_label"] == "A cell"
     assert record["hint"] is None
     saved = ad.read_h5ad(labeled).obs
     assert set(saved["annotune_label"].iloc[:20]) == {"A cell"}
-    assert saved["annotune_hint"].iloc[:20].isna().all()
-    assert set(saved["annotune_final_status"].iloc[:20]) == {"named"}
+    assert "annotune_hint" not in saved.columns
+    assert "annotune_final_status" not in saved.columns
 
 
 def test_cli_stops_before_any_work_when_the_report_cannot_be_written(tmp_path, capsys):

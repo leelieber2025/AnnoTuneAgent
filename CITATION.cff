@@ -4,11 +4,9 @@ message: >-
   If you use this software, please cite the software record below and pin
   the package version used in the analysis.
 abstract: >-
-  Collects a marker score, a name-model result, and an ML-model result for
-  each cluster. A judgment reads the three results and writes the title.
-  The title is a dictionary name. The name model reads dictionary marker
-  hits. The ML model is trained on differential expression and marker-panel
-  statistics.
+  Collects a marker score and a name-model result for each cluster. A check
+  rule keeps that name, replaces it, or drops it. The title is a dictionary
+  name. The name model reads dictionary marker hits.
 type: software
 authors:
   - family-names: "Li"
@@ -17,7 +15,7 @@ authors:
     orcid: "https://orcid.org/0000-0002-9276-9129"
 repository-code: "https://github.com/leelieber2025/AnnoTuneAgent"
 license: Apache-2.0
-version: 0.1.5
+version: 0.1.6
 date-released: "2026-11-17"
 keywords:
   - single-cell

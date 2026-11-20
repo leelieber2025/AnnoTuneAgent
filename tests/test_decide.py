@@ -3,6 +3,7 @@ import json
 from annotuneagent.decide import (
     SYSTEM_ML,
     SYSTEM_NAME,
+    check_proposal,
     cluster_payload,
     ml_stat_row,
     ml_user,
@@ -14,6 +15,65 @@ from annotuneagent.decide import (
     wilcoxon_payload,
 )
 from annotuneagent.hypotheses import Hypothesis
+
+
+def _measured(gene, logfc, pct_in, pct_out=0.1):
+    return {"gene": gene, "logfc": logfc, "pct_in": pct_in, "pct_out": pct_out}
+
+
+def test_check_keeps_a_supported_name_and_ignores_an_ambient_negative():
+    proposal = Hypothesis("T cell", positive=("CD3E", "CD3D"), negative=("MS4A1",))
+    other = Hypothesis("B cell", positive=("MS4A1", "CD79A"), negative=("CD3E",))
+    measurements = {
+        "CD3E": _measured("CD3E", 2.0, 0.8),
+        "CD3D": _measured("CD3D", 1.5, 0.7),
+        "MS4A1": _measured("MS4A1", -1.0, 0.9),
+        "CD79A": _measured("CD79A", 0.1, 0.1),
+    }
+    result = check_proposal("T cell", [proposal, other], measurements)
+    assert result["action"] == "agree"
+    assert result["name"] == "T cell"
+    assert result["also_clean"] == []
+
+
+def test_check_drops_a_name_when_a_negative_marker_is_enriched():
+    proposal = Hypothesis("T cell", positive=("CD3E", "CD3D"), negative=("MS4A1",))
+    measurements = {
+        "CD3E": _measured("CD3E", 2.0, 0.8),
+        "CD3D": _measured("CD3D", 1.5, 0.7),
+        "MS4A1": _measured("MS4A1", 1.2, 0.4),
+    }
+    result = check_proposal("T cell", [proposal], measurements)
+    assert result["action"] == "escalate"
+    assert result["name"] is None
+
+
+def test_check_replaces_an_unsupported_name_with_the_one_clean_candidate():
+    wrong = Hypothesis("fibroblast", positive=("COL1A1", "DCN"), negative=())
+    right = Hypothesis("parietal cell", positive=("ATP4A", "ATP4B"), negative=("MUC5AC",))
+    measurements = {
+        "COL1A1": _measured("COL1A1", 0.1, 0.1),
+        "DCN": _measured("DCN", 0.2, 0.2),
+        "ATP4A": _measured("ATP4A", 3.0, 0.9),
+        "ATP4B": _measured("ATP4B", 2.4, 0.8),
+        "MUC5AC": _measured("MUC5AC", -2.0, 0.05),
+    }
+    result = check_proposal("fibroblast", [wrong, right], measurements)
+    assert result["action"] == "replace"
+    assert result["name"] == "parietal cell"
+
+
+def test_check_escalates_when_two_alternatives_are_clean():
+    one = Hypothesis("T cell", positive=("CD3E", "CD3D"), negative=())
+    two = Hypothesis("NK cell", positive=("NKG7", "GNLY"), negative=())
+    measurements = {
+        "CD3E": _measured("CD3E", 2.0, 0.8),
+        "CD3D": _measured("CD3D", 1.5, 0.7),
+        "NKG7": _measured("NKG7", 2.2, 0.8),
+        "GNLY": _measured("GNLY", 1.8, 0.6),
+    }
+    result = check_proposal("fibroblast", [one, two], measurements)
+    assert result["action"] == "escalate"
 
 
 def test_ml_user_keeps_negative_marker_measurements():
@@ -66,6 +126,25 @@ def test_unmeasured_negative_is_a_null_measurement():
     rows = {row[0]: row for row in user["marker_measurements"]}
     assert rows["MS4A1"] == ["MS4A1", None, None, None]
     assert rows["TRDC"] == ["TRDC", None, None, None]
+
+
+def test_enriched_support_gene_is_listed_and_a_low_one_is_not():
+    from annotuneagent.decide import ranked_payload
+
+    payload = ranked_payload(
+        [("Cd3e", 3.0), ("Cd4", 2.0), ("Cd40lg", 1.2)],
+        {"Cd3e": 0.8, "Cd4": 0.7, "Cd40lg": 0.4, "Foxp3": 0.9},
+        [
+            Hypothesis(
+                "CD4 T",
+                positive=("Cd3e", "Cd4"),
+                support=("Cd40lg", "Foxp3"),
+            )
+        ],
+    )
+    genes = payload["dictionary_hits"][0]["genes"]
+    assert genes == ["Cd3e", "Cd4", "Cd40lg"]
+    assert "Foxp3" not in {item["gene"] for item in payload["genes"]}
 
 
 def test_undetected_gene_is_not_a_dictionary_hit():
