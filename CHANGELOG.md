@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-11-19
+
+### Fixed
+
+- Remove the unused merged-id list in `merge_same_labels`. `ruff` failed the
+  0.1.6 tests job on that assignment. Annotation behavior matches 0.1.6.
+
 ## [0.1.6] - 2026-11-19
 
 ### Changed

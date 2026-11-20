@@ -2,5 +2,5 @@ from annotuneagent._version import __version__, version_tuple
 
 
 def test_version_tuple():
-    assert __version__ == "0.1.6"
-    assert version_tuple == (0, 1, 6)
+    assert __version__ == "0.1.7"
+    assert version_tuple == (0, 1, 7)
