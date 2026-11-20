@@ -825,9 +825,12 @@ def _name_and_marker_name(record: dict, species, dag, label_map) -> str | None:
         return None
     if name != marker and not _same_lineage(name, marker, species, dag, label_map):
         return None
-    if name != marker and _is_descendant(marker, name, species, dag, label_map):
-        return marker
-    return name
+    chosen = name
+    if marker != chosen and _is_descendant(marker, chosen, species, dag, label_map):
+        chosen = marker
+    if ml and ml != chosen and _is_descendant(ml, chosen, species, dag, label_map):
+        chosen = ml
+    return chosen
 
 
 def _unexplained_hint(genes) -> str:
