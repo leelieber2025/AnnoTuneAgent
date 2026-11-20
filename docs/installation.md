@@ -13,7 +13,7 @@ import annotuneagent as ata
 print(ata.__version__)
 ```
 
-The version is set in `src/annotuneagent/_version.py` (currently **0.1.7**).
+The version is set in `src/annotuneagent/_version.py` (currently **0.1.8**).
 
 From a checkout:
 

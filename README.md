@@ -173,12 +173,12 @@ The tokenizer is installed with the package. See
 
 ## Status
 
-**0.1.7 (Alpha).** Import as `import annotuneagent as ata`.
+**0.1.8 (Alpha).** Import as `import annotuneagent as ata`.
 
 ## Citation
 
 For the software record, cite the [Zenodo DOI](https://doi.org/10.5281/zenodo.24092828).
-Pin the package version used in the analysis, for example `annotuneagent==0.1.7`.
+Pin the package version used in the analysis, for example `annotuneagent==0.1.8`.
 
 ## License
 

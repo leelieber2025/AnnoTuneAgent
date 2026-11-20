@@ -4,36 +4,31 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-11-20
+
 ### Changed
 
-- Document the Bioconda install. README and docs show PyPI, Bioconda, and
-  combined download badges. The total is refreshed weekly on the `badges`
-  branch.
-- The load-model tutorial downloads the one merged GGUF. Marker dot plots
-  use square cells.
-
 - A check-accepted fibroblast, smooth muscle cell, macrophage, or monocyte
-  yields when the marker score names a program-specific type on another
-  lineage. A descendant of that broad title stays. One broad title does not
-  replace another.
-- A name the check rule accepted is kept when no dictionary panel is on.
-  The hint lists the enriched genes the dictionary did not cover.
-- `suggest_tissues` sends tongue to the skin page. An author tissue that
-  matches one page, such as large intestine, uses that page's aliases.
-- Dictionary panels that had one positive gene now have a second, except
-  human juxtaglomerular cells (`REN` alone). Prostate basal cells add
-  KRT14 and KRT15. Non-keratinized squamous epithelium (tongue, urethra)
-  is `KRT4` and `KRT13`. Tenocytes add COMP and CILP. Lyve1-positive
-  resident macrophages use LYVE1 and F13A1. Mouse pericytes include Notch3.
-  Superficial-zone chondrocytes use PRG4, SFRP1, and COL2A1. LYVE1-positive
-  macrophages treat PRG4 as a negative.
-- Mammary basal cells use KRT5, KRT14, and ACTA2. Smooth muscle treats
-  KRT5 and KRT14 as negatives. Luminal mammary epithelium adds KRT19.
-- A check-accepted broad title yields to a program-specific descendant.
-  It also yields to a program-specific marker on another lineage when its
-  own program is off. When the name model and the marker score agree, a
-  dictionary gap keeps that name and lists the uncovered genes. An ML call
-  on another lineage still removes it.
+  yields to a program-specific marker on another lineage, and to a
+  program-specific descendant. One broad title does not replace another.
+  Any check-accepted name yields when its own program is off and the marker
+  is program-specific on another lineage.
+- A name the check rule accepted stays when no dictionary panel is on.
+  The same keep applies when the name model and the marker score agree,
+  unless an ML call is on another lineage. The hint lists the uncovered genes.
+- Tongue maps to the skin page. An author tissue that matches one page,
+  such as large intestine, uses that page's aliases.
+- Dictionary panels with one positive gene now have a second, except human
+  juxtaglomerular cells (`REN`). Prostate basal cells add KRT14 and KRT15.
+  Non-keratinized squamous epithelium is KRT4 and KRT13. Tenocytes add COMP
+  and CILP. Lyve1-positive macrophages use LYVE1 and F13A1, with PRG4 as a
+  negative. Mouse pericytes include Notch3. Superficial-zone chondrocytes
+  use PRG4, SFRP1, and COL2A1. Mammary basal cells use KRT5, KRT14, and
+  ACTA2. Smooth muscle treats KRT5 and KRT14 as negatives. Luminal mammary
+  epithelium adds KRT19.
+- Marker dot plots use square cells. The load-model tutorial downloads the
+  one merged GGUF. Docs include the Bioconda install and weekly download
+  badges.
 
 ## [0.1.7] - 2026-11-19
 
