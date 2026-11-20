@@ -2,6 +2,9 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/annotuneagent.svg)](https://pypi.org/project/annotuneagent/)
 [![PyPI downloads](https://img.shields.io/pepy/dt/annotuneagent.svg?label=PyPI%20downloads)](https://pepy.tech/project/annotuneagent)
+[![Bioconda](https://img.shields.io/conda/vn/bioconda/annotuneagent.svg)](https://anaconda.org/bioconda/annotuneagent)
+[![Bioconda downloads](https://img.shields.io/conda/dn/bioconda/annotuneagent.svg?label=Bioconda%20downloads)](https://anaconda.org/bioconda/annotuneagent)
+[![Total downloads](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/leelieber2025/AnnoTuneAgent/badges/downloads.json)](https://github.com/leelieber2025/AnnoTuneAgent/blob/badges/history.json)
 [![Python versions](https://img.shields.io/pypi/pyversions/annotuneagent.svg)](https://pypi.org/project/annotuneagent/)
 [![Documentation Status](https://readthedocs.org/projects/annotuneagent/badge/?version=latest)](https://annotuneagent.readthedocs.io/en/latest/?badge=latest)
 [![CI](https://github.com/leelieber2025/AnnoTuneAgent/actions/workflows/tests.yml/badge.svg)](https://github.com/leelieber2025/AnnoTuneAgent/actions/workflows/tests.yml)
@@ -76,6 +79,7 @@ Python 3.10–3.13.
 
 ```bash
 pip install annotuneagent
+# or: conda install -c conda-forge -c bioconda annotuneagent
 ```
 
 Local GGUF models need `pip install 'annotuneagent[models]'`, which installs

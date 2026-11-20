@@ -4,6 +4,8 @@ Python 3.10–3.13.
 
 ```bash
 pip install annotuneagent
+# or
+conda install -c conda-forge -c bioconda annotuneagent
 ```
 
 ```python

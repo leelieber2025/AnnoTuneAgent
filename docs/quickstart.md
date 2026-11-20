@@ -2,6 +2,7 @@
 
 ```bash
 pip install annotuneagent
+# or: conda install -c conda-forge -c bioconda annotuneagent
 ```
 
 ```python

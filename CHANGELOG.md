@@ -6,6 +6,10 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- Document the Bioconda install. README and docs show PyPI, Bioconda, and
+  combined download badges. The total is refreshed weekly on the `badges`
+  branch.
+
 - A check-accepted fibroblast, smooth muscle cell, macrophage, or monocyte
   yields when the marker score names a program-specific type on another
   lineage. A descendant of that broad title stays. One broad title does not
