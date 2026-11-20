@@ -2109,19 +2109,12 @@ def merge_same_labels(adata: AnnData, cluster_key: str, label_key: str) -> list[
     for uid, found in names_per_unit.items():
         if len(found) == 1:
             by_name[next(iter(found))].append(uid)
-    chosen_for: dict[str, str] = {}
     merged: list[dict[str, object]] = []
     for name, members in by_name.items():
         ordered = sorted(members, key=_unit_key)
         chosen = ordered[0]
-        for uid in ordered:
-            chosen_for[uid] = chosen
         if len(ordered) > 1:
             merged.append({"name": name, "cluster": chosen, "members": ordered})
-    new_ids = [
-        chosen_for[str(uid)] if ok and str(uid) in chosen_for else str(uid)
-        for uid, ok in zip(unit, named, strict=True)
-    ]
     return merged
 
 
