@@ -779,9 +779,7 @@ def check_proposal(
     states = {name: status(item) for name, item in by_name.items()}
     state = states.get(proposal) if proposal else None
     clean = [
-        name
-        for name, item_status in states.items()
-        if item_status == "clean" and name != proposal
+        name for name, item_status in states.items() if item_status == "clean" and name != proposal
     ]
     if state == "clean":
         return {"action": "agree", "name": proposal, "reason": "agree", "also_clean": clean}

@@ -240,9 +240,13 @@ def main(argv: list[str] | None = None) -> int:
         help="server root, default http://127.0.0.1:8080; reuse requires matching GGUF and adapters",
     )
     parser.add_argument("--name-url", help="name adapter server root")
-    parser.add_argument("--ml-url", help="accepted and not called; the check rule replaces the ML request")
+    parser.add_argument(
+        "--ml-url", help="accepted and not called; the check rule replaces the ML request"
+    )
     parser.add_argument("--name-adapter", help="name LoRA GGUF loaded on the base")
-    parser.add_argument("--ml-adapter", help="accepted and not loaded; the check rule replaces the ML request")
+    parser.add_argument(
+        "--ml-adapter", help="accepted and not loaded; the check rule replaces the ML request"
+    )
     parser.add_argument(
         "--base",
         help="merged name GGUF, or the base used with --name-adapter",

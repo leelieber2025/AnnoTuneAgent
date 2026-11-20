@@ -775,7 +775,9 @@ def _loaded_servers() -> list[dict]:
         names = [part for value in _all_args(argv, "--lora") for part in value.split(",") if part]
         if len(names) == 2:
             adapters = dict(zip(_TASKS, names, strict=True))
-        elif len(names) == 1 and "name" in set(re.split(r"[^a-z0-9]+", Path(names[0]).name.lower())):
+        elif len(names) == 1 and "name" in set(
+            re.split(r"[^a-z0-9]+", Path(names[0]).name.lower())
+        ):
             adapters = {"name": names[0]}
         else:
             adapters = {}
